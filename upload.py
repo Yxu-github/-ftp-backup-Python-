@@ -1,1 +1,0 @@
-class FtP_server():
