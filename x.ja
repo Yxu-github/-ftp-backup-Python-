@@ -1,0 +1,2665 @@
+源程序清单
+dboperator.cs
+using System;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Web;
+using System.Data.SQLite;
+using System.Data;
+using System.Collections;
+namespace Clover.AppCode
+{
+    public class dbOperator
+    {
+        public string uerLogin(string userName, string password)
+        {
+            string ret = "error";
+            string sql = "select password from userlist where username='" + userName + "'";
+            try
+            {
+                string pwd = Sqlite3Helper.ExecuteScalar(sql, null).ToString();
+                if (pwd != "")
+                {
+                    if (pwd == password)
+                    {
+                        return "OK";
+                    }
+                }
+            }
+            catch (SQLiteException ex)
+            {
+                ret = ex.Message;
+            }
+            catch (Exception ex)
+            {
+                ret = ex.Message;
+            }
+            return ret;
+        }
+        #region 类型管理相关
+        public System.Data.DataSet getSubType(int parentId)
+        {
+            string ret = "";
+            string sql = "";
+            sql = "select id as Item_id ,typeName as Item_name , parentId as Parent_ID, PhotoUrl,0 as xh, '#' as typeUrl, productsNum, isLastType  from ProductType where parentId=" + parentId.ToString() + " order by id asc";
+            System.Data.DataSet ds = Sqlite3Helper.ExecuteDataset(sql, null);
+            if (ds != null)
+            {
+                for (int i = 0; i < ds.Tables[0].Rows.Count; i++)
+                {
+                    ds.Tables[0].Rows[i]["xh"] = i + 1;//
+                    ret= ds.Tables[0].Rows[i]["isLastType"].ToString();
+                    if (ret=="False" || ret == "0") //不是产品的直接父类型
+                    {
+                        ret =ds.Tables[0].Rows[i]["productsNum"].ToString();
+                        if(ret!="0")
+                            ds.Tables[0].Rows[i]["typeUrl"] = "ViewSubType?typeId=" + ds.Tables[0].Rows[i]["Item_id"].ToString();
+                    }
+                    else //是产品的直接父类型
+                    {
+                        ret = ds.Tables[0].Rows[i]["productsNum"].ToString();
+                        if (ret!="0")
+                            ds.Tables[0].Rows[i]["typeUrl"] = "ViewTypeProducts?typeId=" + ds.Tables[0].Rows[i]["Item_id"].ToString();
+                    }
+                    //计算出该子类的所有商品总数
+                    ds.Tables[0].Rows[i]["productsNum"] = ret;
+                    if (ds.Tables[0].Rows[i]["PhotoUrl"].ToString()=="")
+                    {
+                        ds.Tables[0].Rows[i]["PhotoUrl"] = "icon.png";
+                    }
+                }
+            }
+          return ds;
+        }
+        public bool updateTypeProductsCountInfo()
+        {
+            string tempId = "",tempCount="";
+            string sql = "";
+            sql = "select id from ProductType ";
+            System.Data.DataSet ds = Sqlite3Helper.ExecuteDataset(sql, null);
+            if (ds != null)
+            {
+                for (int i = 0; i < ds.Tables[0].Rows.Count; i++)
+                {
+                    tempId = ds.Tables[0].Rows[i][0].ToString();
+                    tempCount = getATypesProductCount(Convert.ToInt32(tempId));
+            sql = "update ProductType set productsNum=" + tempCount + " where id=" + tempId;
+                    Sqlite3Helper.ExecuteNonQuery(sql, null);
+                }
+            }
+            sql = "update  ProductType set isLastType =0";
+            Sqlite3Helper.ExecuteNonQuery(sql, null);
+            sql = "update  ProductType set isLastType =1 where id  in (select distinct typeid from productinfo)";
+            Sqlite3Helper.ExecuteNonQuery(sql, null);
+            return true;
+        }
+        public string addAType(string typeName, string typeDetail, int parentId, out int typeID)
+        {
+            string ret = "error";
+            typeID = 0;
+            try
+            {
+                string sql = "insert into ProductType(typeName,typeDetail,parentId) values(@typeName,@typeDetail,@parentId)";
+SQLiteParameter[] parameters = new SQLiteParameter[]{
+                               new SQLiteParameter("@typeName",typeName) ,
+                               new SQLiteParameter("@typeDetail",typeDetail) ,
+                               new SQLiteParameter("@parentId", parentId) };
+                if (Sqlite3Helper.ExecuteNonQuery(sql, parameters) == "1")
+                {
+sql = "select id  from ProductType where typeName=@typeName and parentId=@parentId";
+                    SQLiteParameter[] param = new SQLiteParameter[]{
+                                new SQLiteParameter("@typeName",typeName) ,
+                                 new SQLiteParameter("@parentId", parentId) };
+                    ret = Sqlite3Helper.ExecuteScalar(sql, param).ToString();
+                    typeID = Convert.ToInt32(ret);
+                    ret = "ok";
+                }
+            }
+            catch (SQLiteException ex)
+            {
+                ret = ex.Message;
+            }
+            catch (Exception ex)
+            {
+                ret = ex.Message;
+            }
+            finally
+            {
+            }
+            return ret;
+        }
+        public string deleteAType(int typeID)
+        {
+            string ret = "error";
+            string sql = "select PhotoUrl from ProductType where PhotoUrl is not null and id=" + typeID.ToString();
+            try
+            {
+                string PhotoUrl = Sqlite3Helper.ExecuteScalar(sql, null).ToString();
+                if (PhotoUrl != "")
+System.IO.File.Delete(System.Web.HttpContext.Current.Server.MapPath("./pictures/") + PhotoUrl);
+            }
+            catch (Exception ex)
+            {
+                ret = ex.Message;
+            }
+            finally
+            {
+            }
+            sql = "delete from ProductType where id=" + typeID.ToString();
+            ret = Sqlite3Helper.ExecuteNonQuery(sql, null);
+            if (ret == "1")
+            {
+                ret = "ok";
+            }
+            return ret;
+        }
+        public string renameAType(string typeName, string typeDetail, int TypeId)
+        {
+            string ret = "ok";
+            string sql = "update ProductType set typeName= @typeName, typeDetail=@typeDetail  where Id=" + TypeId.ToString();// @TypeId";
+            SQLiteParameter[] parameters = new SQLiteParameter[]{
+                             new SQLiteParameter("@typeName",typeName) ,
+                             new SQLiteParameter("@typeDetail", typeDetail) };
+            ret = Sqlite3Helper.ExecuteNonQuery(sql, parameters);
+            if (ret == "1")
+            {
+                ret = "ok";
+            }
+            return ret;
+        }
+        public string updateATypePhoto(string photoName, int id)
+        {
+            string ret = "error";
+            string sql = "select PhotoUrl from ProductType where id=" + id.ToString();
+            try
+            {
+                string PhotoUrl = Sqlite3Helper.ExecuteScalar(sql, null).ToString();
+                try
+                {
+                    if (PhotoUrl != "")
+System.IO.File.Delete(System.Web.HttpContext.Current.Server.MapPath("~/pictures/") + PhotoUrl);
+                }
+                catch(Exception ex)
+                {//删除文件
+                }
+sql = "update ProductType set PhotoUrl= @PhotoUrl where id=" + id.ToString();
+                SQLiteParameter[] parameters = new SQLiteParameter[]{
+                            new SQLiteParameter("@PhotoUrl",photoName) };
+                ret = Sqlite3Helper.ExecuteNonQuery(sql, parameters);
+                if (ret == "1")
+                {
+                    ret = "ok";
+                }
+            }
+            catch (SQLiteException ex)
+            {
+                ret = ex.Message;
+            }
+            catch (Exception ex)
+            {
+                ret = ex.Message;
+            }
+            return ret;
+        }
+        private string getATypesProductCount(int Typeid)
+        {
+            string ret="";
+            string sql = "select count(*) from ProductInfo where TypeID in ("+ Typeid.ToString() + ")"//;
+                + " or TypeID in ( select id from ProductType where parentid=" + Typeid.ToString() + ")"//;
+                + " or TypeID  in ( select id from ProductType where parentid in( select id from ProductType where parentid=" + Typeid.ToString() + ") )";
+            try
+            {
+                ret = Sqlite3Helper.ExecuteScalar(sql, null).ToString();
+
+            }
+            catch (SQLiteException ex)
+            {
+                ret = ex.Message;
+            }
+            catch (Exception ex)
+            {
+                ret = ex.Message;
+            }
+            return ret;
+        }
+        private string isLastType(int Typeid)
+        {
+            string ret = "error";
+            string sql = "select count(*) from ProductType where parentid=" + Typeid.ToString();
+            try
+            {
+                ret = Sqlite3Helper.ExecuteScalar(sql, null).ToString();
+                if (ret != "0")
+                    return "type";
+                sql = "select count(*) from ProductInfo where TypeID=" + Typeid.ToString();
+                ret = Sqlite3Helper.ExecuteScalar(sql, null).ToString();
+            }
+            catch (SQLiteException ex)
+            {
+                ret = ex.Message;
+            }
+            catch (Exception ex)
+            {
+                ret = ex.Message;
+            }
+            return ret;
+        }
+        public string[] getATypeNameAndDetail(int id)
+        {
+            string[] ret = new string[3] { "", "", "" };
+            string sql = "select typeName,typeDetail,PhotoUrl from ProductType where id=" + id.ToString();
+            try
+            {
+                DataRow row = Sqlite3Helper.ExecuteDataRow(sql, null);
+                if (row != null)
+                {
+                    ret[0] = row["typeName"].ToString();
+                    ret[1] = row["typeDetail"].ToString();
+                    ret[2] = row["PhotoUrl"].ToString();
+                }
+            }
+            catch (SQLiteException ex)
+            {
+                ret[0] = ex.Message;
+                ret[1] = ex.Message;
+            }
+            catch (Exception ex)
+            {
+                ret[0] = ex.Message;
+                ret[1] = ex.Message;
+            }
+            return ret;
+        }
+        public DataSet getaTypeAllBrothers(int id)
+        {
+            DataSet ds = new DataSet();
+            try
+            {
+                string sql = "select parentid from ProductType where id=" + id.ToString();
+                string ret;
+                if (ds != null)
+                {
+                    ret = Sqlite3Helper.ExecuteScalar(sql, null).ToString();
+                    sql = "select id,typeName from ProductType where parentid=" + ret + " and id!=" +id.ToString()+" order by id";
+                    ds = Sqlite3Helper.ExecuteDataset(sql, null);
+                }
+            }
+            catch(SQLiteException ex)
+            {
+            }
+            return ds;
+        }
+        public DataSet getaTypeAllPartents(int id)
+        {
+            DataSet ds = new DataSet();
+            string sql = "select parentid,id,typeName from ProductType where id=" + id.ToString();
+            ds = Sqlite3Helper.ExecuteDataset(sql, null);
+            if (ds != null)
+            {
+                string tempId = ds.Tables[0].Rows[0]["parentid"].ToString();
+                while (tempId != "0")
+                {
+          sql = "select parentid,id,typeName from ProductType where id=" + tempId;
+                    DataRow dw = Sqlite3Helper.ExecuteDataRow(sql, null);
+                    //找到父类别
+                    DataRow row = ds.Tables[0].NewRow();
+                    row.ItemArray = dw.ItemArray;
+                    ds.Tables[0].Rows.InsertAt(row, 0);
+                    tempId = dw["parentid"].ToString();
+                }
+            }
+            return ds;
+        }
+        /// <summary>
+        /// 找到一个类别的根父类
+        /// </summary>
+        /// <param name="id"></param>
+        /// <returns></returns>
+        public int getaATypeRootPartents(int id)
+        {
+            string parentId = "";
+            string sql = "select parentid from ProductType where id=" + id.ToString();
+            parentId = Sqlite3Helper.ExecuteScalar(sql, null).ToString();
+            id = Convert.ToInt32(parentId);
+            while (id > 4)
+            {
+                sql = "select parentid from ProductType where id=" + id.ToString();
+                parentId = Sqlite3Helper.ExecuteScalar(sql, null).ToString();
+                id = Convert.ToInt32(parentId);
+            }
+            return id;
+        }
+        public int getTypeidByName(string name)
+        {
+            int id = 0;
+            string sql = "select id from ProductType where typeName='" + name + "'";
+            string ret = Sqlite3Helper.ExecuteScalar(sql, null).ToString();
+            if (ret != "")
+            {
+                id = Convert.ToInt32(ret);
+            }
+            return id;
+        }
+        #endregion 类型管理相关
+        #region Product
+        public string addAProduct(string productName, string productDetail, int typeID)
+        {
+            string ret = "error";
+            try
+            {
+                string sql = "insert into ProductInfo(ProductName,ProductDetail,TypeID) values(@ProductName,@ProductDetail,@typeID)";
+                SQLiteParameter[] parameters = new SQLiteParameter[]{
+                      new SQLiteParameter("@ProductName",productName) ,
+                      new SQLiteParameter("@ProductDetail",productDetail) ,
+                      new SQLiteParameter("@typeID", typeID) };
+                ret = Sqlite3Helper.ExecuteNonQuery(sql, parameters);
+                if (ret == "1")
+                {
+                    ret = "ok";
+                }
+            }
+            catch (Exception ex)
+            {
+                ret = ex.Message;
+            }
+            finally
+            {
+            }
+            return ret;
+        }
+        public DataSet getATypeAllProduct(int type)
+        {
+            string sql = "select id,ProductName,'' as PhotoUrl, 0 as xh from ProductInfo where typeId=" + type.ToString() + " order by id asc";
+            System.Data.DataSet ds = Sqlite3Helper.ExecuteDataset(sql, null);
+            if (ds != null)
+            {
+                for (int i = 0; i < ds.Tables[0].Rows.Count; i++)
+                {
+                    sql = "select min(id), PhotoUrl from ProductPhoto where ProductId=" + ds.Tables[0].Rows[i]["id"].ToString();
+                    DataRow row = Sqlite3Helper.ExecuteDataRow(sql, null);
+                    if (row["PhotoUrl"] != null && row["PhotoUrl"].ToString()!="")
+                    {
+                        ds.Tables[0].Rows[i]["PhotoUrl"] = row["PhotoUrl"].ToString();
+                    }
+                    else
+                    {
+                        ds.Tables[0].Rows[i]["PhotoUrl"] = "logo.png";
+                    }
+                    ds.Tables[0].Rows[i]["xh"] = i + 1;
+                }
+            }
+            return ds;
+        }
+        public string[] getaProductInto(int id)
+        {
+            string[] ret = new string[4] { "", "", "","" };
+            string sql = "select ProductName,ProductDetail,TechPic from ProductInfo where id=" + id.ToString();
+            try
+            {
+                DataRow row = Sqlite3Helper.ExecuteDataRow(sql, null);
+                if (row != null)
+                {
+                    ret[0] = row[0].ToString(); //reader.GetString(0);
+                    ret[1] = row[1].ToString(); //reader.GetString(1);
+                    ret[2] = row[2].ToString(); //reader.GetString(2);
+sql = "select min(id), PhotoUrl from ProductPhoto where ProductId=" + id.ToString();
+                    row = Sqlite3Helper.ExecuteDataRow(sql, null);
+                    if (row != null)
+                        ret[3] = row[1].ToString();
+                }
+                else
+                {
+                    ret[0] = "error";
+                }
+            }
+            catch (Exception ex)
+            {
+                ret[0] = ex.Message;
+                ret[1] = ex.Message;
+            }
+            finally
+            {
+            }
+            return ret;
+        }
+        public DataSet getaFakeProductPicture(int count)
+        {
+            string sql = "select min(id) as id,'' as PhotoName,'' as PhotoUrl,0 as ProductID from ProductPhoto ";
+            DataSet ds = new DataSet();
+            ds = Sqlite3Helper.ExecuteDataset(sql, null);
+            if (ds == null) //查询出错
+                return null;
+            DataRow row = ds.Tables[0].Rows[0];
+            for (int i = ds.Tables[0].Rows.Count; i < count; i++)
+            {
+                ds.Tables[0].ImportRow(row);
+            }
+            return ds;
+        }
+        public DataSet getaProductPicture(int id)
+        {
+            string[] ret = new string[2] { "", "" };
+            string sql = "select id,PhotoName,PhotoUrl,ProductID from ProductPhoto where productId=" + id.ToString() + " order by id asc";
+            try
+            {
+                System.Data.DataSet ds = Sqlite3Helper.ExecuteDataset(sql, null);
+                return ds;
+            }
+            catch (Exception ex)
+            {
+            }
+            finally
+            {
+            }
+            return null;
+        }
+public string renameAProduct(string productName, string productDetail, int productId)
+        {
+            string ret = "error";
+            string sql = "update ProductInfo set ProductName= @ProductName, ProductDetail= @ProductDetail  where Id=" + productId.ToString();// @TypeId";
+            SQLiteParameter[] parameters = new SQLiteParameter[]{
+                   new SQLiteParameter("@ProductName",productName) ,
+                   new SQLiteParameter("@ProductDetail", productDetail) };
+            ret = Sqlite3Helper.ExecuteNonQuery(sql, parameters);
+            if (ret == "1")
+            {
+                ret = "ok";
+            }
+            return ret;
+        }
+        public string deleteAProduct(int productId)
+        {
+            string ret = "error";
+string sql = "delete from ProductInfo where Id=" + productId.ToString();// @TypeId";
+            ret = Sqlite3Helper.ExecuteNonQuery(sql, null);
+            if (ret == "1")
+            {
+                ret = "ok";
+            }
+            return ret;
+        }
+public string insertAProductPhoto(string photoName, string PhotoUrl, int productId)
+        {
+            string ret = "error";
+            string sql = "insert into  ProductPhoto(PhotoName,PhotoUrl,ProductID) values(@PhotoName,@PhotoUrl," + productId.ToString() + ")";
+            try
+            {
+                SQLiteParameter[] parameters = new SQLiteParameter[]{
+                      new SQLiteParameter("@PhotoName",photoName),
+                      new SQLiteParameter("@PhotoUrl",PhotoUrl) };
+                ret = Sqlite3Helper.ExecuteNonQuery(sql, parameters);
+                if (ret == "1")
+                {
+                    ret = "ok";
+                }
+            }
+            catch (SQLiteException ex)
+            {
+                ret = ex.Message;
+            }
+            catch (Exception ex)
+            {
+                ret = ex.Message;
+            }
+            return ret;
+        }
+        public string updateAProductTechPho(string PhotoUrl, int productId)
+        {
+            string ret = "error";
+string sql = "select TechPic from ProductInfo where id=" + productId.ToString();
+            try
+            {
+                string oldPhotoUrl = Sqlite3Helper.ExecuteScalar(sql, null).ToString();
+                try
+                {
+                    if (PhotoUrl != "" && oldPhotoUrl != "performance.jpg")
+System.IO.File.Delete(System.Web.HttpContext.Current.Server.MapPath("~/pictures/") + oldPhotoUrl);
+                }
+                catch (Exception ex)
+                {//删除文件失败
+                }
+                sql = "update ProductInfo set TechPic=@PhotoUrl where id=" + productId.ToString();
+                SQLiteParameter[] parameters = new SQLiteParameter[]{
+                      new SQLiteParameter("@PhotoUrl",PhotoUrl) };
+                ret = Sqlite3Helper.ExecuteNonQuery(sql, parameters);
+                if (ret == "1")
+                {
+                    ret = "ok";
+                }
+            }
+            catch (SQLiteException ex)
+            {
+                ret = ex.Message;
+            }
+            catch (Exception ex)
+            {
+                ret = ex.Message;
+            }
+            return ret;
+        }
+        public string deleteAProductPhoto(int id)
+        {
+            string ret = "error";
+            string sql = "select PhotoUrl from ProductPhoto where id=" + id.ToString();
+            try
+            {
+                string PhotoUrl = Sqlite3Helper.ExecuteScalar(sql, null).ToString();
+System.IO.File.Delete(System.Web.HttpContext.Current.Server.MapPath("~/pictures/") + PhotoUrl);
+                sql = "delete  from ProductPhoto where id=" + id.ToString();
+                ret = Sqlite3Helper.ExecuteNonQuery(sql, null);
+                if (ret == "1")
+                {
+                    ret = "ok";
+                }
+            }
+            catch (SQLiteException ex)
+            {
+                ret = ex.Message;
+            }
+            catch (Exception ex)
+            {
+                ret = ex.Message;
+            }
+            return ret;
+        }
+        public DataSet getaProductAllPartents(int id)
+        {
+            DataSet ds = new DataSet();
+            string sql = "select typeId as parentid,id,ProductName as typeName from ProductInfo where id=" + id.ToString();
+            ds = Sqlite3Helper.ExecuteDataset(sql, null);
+            if (ds != null && ds.Tables[0].Rows.Count>0)
+            {
+                string tempId = ds.Tables[0].Rows[0]["parentid"].ToString();
+                ds.Tables[0].Rows.Clear();//当前行不要
+                while (tempId != "0")
+                {
+sql = "select parentid,id,typeName from ProductType where id=" + tempId;
+                    DataRow dw = Sqlite3Helper.ExecuteDataRow(sql, null);
+                    //找到父类别
+                    DataRow row = ds.Tables[0].NewRow();
+                    row.ItemArray = dw.ItemArray;
+                    ds.Tables[0].Rows.InsertAt(row, 0);
+                    tempId = dw["parentid"].ToString();
+                }
+            }
+            return ds;
+        }
+        /// <summary>
+        /// 获取count个产品的空白记录凑齐显示用
+        /// </summary>
+        /// <param name="id"></param>
+        /// <returns></returns>
+        public DataSet getaFakeProducts(int count)
+        {
+            DataSet ds = new DataSet();
+            string sql = "select min(id) as id, 'no' as ProductName, 'logo.png' as PhotoUrl from ProductInfo";
+            ds = Sqlite3Helper.ExecuteDataset(sql, null);
+            if (ds == null) //查询出错
+                return null;
+            DataRow row = ds.Tables[0].Rows[0];
+            for (int i=ds.Tables[0].Rows.Count;i<count;i++)
+            {
+                ds.Tables[0].ImportRow(row);
+            }
+            return ds;
+        }
+        /// <summary>
+        /// 获取一个类别的所有子孙产品
+        /// 首先获取该类别的所有子类，然后
+        /// </summary>
+        /// <param name="id"></param>
+        /// <returns></returns>
+        public DataSet getaTypeAllProducts(int parentid)
+        {
+            string sql = "";
+            DataSet ds = new DataSet();
+sql = "select 0 as id, '' as ProductName, '' as PhotoUrl,'' as typeName from ProductInfo";
+            ds = Sqlite3Helper.ExecuteDataset(sql, null);
+            if (ds == null) //没有任何产品
+                return null;
+            else
+                ds.Tables[0].Rows.Clear();//当前行不要
+            Queue q = new Queue();
+            q.Enqueue(parentid);
+            while (q.Count > 0)
+            {
+                string typeId = q.Dequeue().ToString();
+                sql = "select ProductInfo.id,ProductInfo.ProductName ,'' as PhotoUrl,ProductType.typeName from ProductInfo,ProductType where ProductInfo.typeId=ProductType.id and ProductInfo.typeId=" + typeId.ToString()+ " order by ProductInfo.id";
+                DataSet dsTemp = Sqlite3Helper.ExecuteDataset(sql, null);
+                if (dsTemp != null)
+                {//读取到了产品,加入产品DataSet
+                    for (int i = 0; i < dsTemp.Tables[0].Rows.Count; i++)
+                    {
+                        ds.Tables[0].ImportRow(dsTemp.Tables[0].Rows[i]);
+                    }
+                    dsTemp.Clear();
+                }
+                sql = "select id from ProductType where parentid=" + typeId.ToString();
+                dsTemp = Sqlite3Helper.ExecuteDataset(sql, null);
+                if (dsTemp != null)
+                {//读取子类型加入到队列
+                    for (int i = 0; i < dsTemp.Tables[0].Rows.Count; i++)
+                    {
+                        q.Enqueue(dsTemp.Tables[0].Rows[i][0].ToString());
+                    }
+                    dsTemp.Clear();
+                }
+            }
+            for (int i = 0; i < ds.Tables[0].Rows.Count; i++)
+            {
+                sql = "select min(id), PhotoUrl from ProductPhoto where ProductId=" + ds.Tables[0].Rows[i][0].ToString();
+                DataRow row = Sqlite3Helper.ExecuteDataRow(sql, null);
+                if (row["PhotoUrl"].ToString() != "")
+                    ds.Tables[0].Rows[i]["PhotoUrl"] = row["PhotoUrl"];
+                else
+                    ds.Tables[0].Rows[i]["PhotoUrl"] = "logo.png";
+            }
+            return ds;
+        }
+        #endregion
+        #region 留言相关
+        public string addComment(Comments comment)
+        {
+            string ret = "error";
+string sql = "insert into comments(Name,addr,tele,mail,Comments,country,addTime)";
+sql += " values(@Name,@addr,@tele,@mail,@Comments,@country,datetime(CURRENT_TIMESTAMP,'localtime'))";
+            try
+            {
+                SQLiteParameter[] parameters = new SQLiteParameter[]{
+                        new SQLiteParameter("@Name",comment.name),
+                        new SQLiteParameter("@addr",comment.addr),
+                        new SQLiteParameter("@tele",comment.tele),
+                        new SQLiteParameter("@mail",comment.mail),
+                        new SQLiteParameter("@Comments",comment.comment),
+                        new SQLiteParameter("@country",comment.country)
+                };
+                ret = Sqlite3Helper.ExecuteNonQuery(sql, parameters);
+                if (ret == "1")
+                {
+                    ret = "ok";
+                }
+            }
+            catch (SQLiteException ex)
+            {
+                ret = ex.Message;
+            }
+            catch (Exception ex)
+            {
+                ret = ex.Message;
+            }
+            return ret;
+        }
+        /// <summary>
+        /// 获取留言
+        /// </summary>
+        /// <param name="flag">0-全部 1-未读 2-已读</param>
+        /// <returns></returns>
+        public  DataSet getComments(int flag,out string memo)
+        {
+            string sql="";
+            memo = "ok";
+            sql = "select * from comments";
+            if (flag == 1)
+                sql += " where isRead=0";
+            else if(flag==2)
+                sql += " where isRead=1";
+            sql += " order by addTime desc";//倒序排列
+            try
+            {
+                DataSet ds = Sqlite3Helper.ExecuteDataset(sql, null);
+                if (ds == null) //没有任何产品
+                    return null;
+                else
+                    return ds;
+            }
+            catch(SQLiteException ex)
+            {
+                memo = ex.Message;
+            }
+            catch(Exception ex)
+            {
+                memo = ex.Message;
+            }
+            return null;
+        }
+        public string updateCommentStatus(int id,int state)
+        {
+            string ret = "error";
+            string sql = "update comments set isRead=" + state + " where id=" + id.ToString();
+            try
+            {
+                ret = Sqlite3Helper.ExecuteNonQuery(sql, null);
+                if (ret == "1")
+                    ret = "ok";
+            }
+            catch(SQLiteException ex)
+            {
+                ret = ex.Message;
+            }
+            catch(Exception ex)
+            {
+                ret = ex.Message;
+            }
+            return ret;
+        }
+        public string deleteComment(int id)
+        {
+            string ret = "error";
+            string sql = "delete from comments  where id=" + id.ToString();
+            try
+            {
+                ret = Sqlite3Helper.ExecuteNonQuery(sql, null);
+                if (ret == "1")
+                    ret = "ok";
+            }
+            catch (SQLiteException ex)
+            {
+                ret = ex.Message;
+            }
+            catch (Exception ex)
+            {
+                ret = ex.Message;
+            }
+            return ret;
+        }
+        #endregion
+        #region 新闻相关
+        /// <summary>
+        /// 获取新闻
+        /// </summary>
+        /// <param name="memo">查询操作备注</param>
+        /// <returns></returns>
+        public DataSet getAllNews( out string memo)
+        {
+            string sql = "";
+            memo = "ok";
+            sql = "select id,title,addTime from news order by id desc";
+            try
+            {
+                DataSet ds = Sqlite3Helper.ExecuteDataset(sql, null);
+                if (ds == null) //没有任何产品
+                    return null;
+                else
+                {
+                    for(int i=ds.Tables[0].Rows.Count;i<10;i++)
+                    {
+                        ds.Tables[0].ImportRow(ds.Tables[0].Rows[0]);
+                        ds.Tables[0].Rows[i]["id"] = 0;
+                        ds.Tables[0].Rows[i]["title"] = "";
+                    }
+                    return ds;
+                }
+            }
+            catch (SQLiteException ex)
+            {
+                memo = ex.Message;
+            }
+            catch (Exception ex)
+            {
+                memo = ex.Message;
+            }
+            return null;
+        }
+
+        public string addNews(string title,string content)
+        {
+            string ret = "error";
+            string sql = "insert into news(title,content) values(@title,@content)";
+            try
+            {
+                SQLiteParameter[] parameters = new SQLiteParameter[]{
+                        new SQLiteParameter("@title",title),
+                        new SQLiteParameter("@content",content),
+                };
+                ret = Sqlite3Helper.ExecuteNonQuery(sql, parameters);
+                if (ret == "1")
+                {
+                    ret = "ok";
+                }
+            }
+            catch (SQLiteException ex)
+            {
+                ret = ex.Message;
+            }
+            catch (Exception ex)
+            {
+                ret = ex.Message;
+            }
+            return ret;
+        }
+        public string[] getaNews(int id)
+        {
+            string[] ret = new string[2] { "", "" };
+            string sql = "select title,content from News where id=" + id.ToString();
+            try
+            {
+                DataRow row = Sqlite3Helper.ExecuteDataRow(sql, null);
+                if (row != null)
+                {
+                    ret[0] = row[0].ToString(); //reader.GetString(0);
+                    ret[1] = row[1].ToString(); //reader.GetString(1);
+                }
+                else
+                {
+                    ret[0] = "error";
+                }
+            }
+            catch (Exception ex)
+            {
+                ret[0] = ex.Message;
+                ret[1] = ex.Message;
+            }
+            finally
+            {
+            }
+            return ret;
+        }
+        public string deleteANews(int id)
+        {
+            string ret = "error";
+            string sql = "delete from news where id=" + id.ToString();
+            try
+            {
+                ret = Sqlite3Helper.ExecuteNonQuery(sql, null);
+                if (ret == "1")
+                    ret = "ok";
+            }
+            catch (SQLiteException ex)
+            {
+                ret = ex.Message;
+            }
+            catch (Exception ex)
+            {
+                ret = ex.Message;
+            }
+            return ret;
+        }
+        #endregion 新闻相关
+
+        #region IP判断相关
+        public bool isPingGoogleMap()
+        {
+            System.Net.NetworkInformation.Ping pingSender = new System.Net.NetworkInformation.Ping();
+            System.Net.NetworkInformation.PingReply reply = pingSender.Send("map.google.com", 120);//第一个参数为ip地址，第二个参数为ping的时间
+            if (reply.Status == System.Net.NetworkInformation.IPStatus.Success)
+            {  //ping的通
+                return true;
+            }
+            else
+            {   //ping不通
+                return false;
+            }
+        }
+        public string getIpInfo(string ip)
+        {
+            string str = System.Web.HttpContext.Current.Server.MapPath("./AppCode");
+            try
+            {
+                QqwryHelper.Init(str + "\\qqwry.dat");
+                stLocation st = QqwryHelper.GetLocation(ip);
+                str = st.Contry;
+            }
+            catch (Exception ex)
+            {
+                str = ex.Message;
+            }
+            finally
+            {
+               QqwryHelper.Dispose();
+            }
+            return str;
+        }
+        public bool isIpInChina(string ip)
+        {
+            if (ip == "::1")
+                return true;
+            string str=System.Web.HttpContext.Current.Server.MapPath("./AppCode");
+            try
+            {
+                QqwryHelper.Init(str + "\\qqwry.dat");
+                stLocation st = QqwryHelper.GetLocation(ip);
+                string[] sf = { "山东", "山西", "河北", "河南", "湖北", "湖南", "广东", "广西", "黑龙", "辽宁", "浙江", "安徽", "江苏", "福建", "甘肃", "江西", "云南", "贵州", "四川", "青海", "陕西", "吉林", "宁夏", "海南", "西藏", "内蒙", "新疆", "北京", "天津", "重庆", "上海" };
+                if (st.Contry.Length < 2)
+                    return false;
+                string country = st.Contry.Substring(0, 2);
+                for (int i = 0; i < sf.Length; i++)
+                {
+                    if (country == sf[i])
+                        return true;
+                }
+            }
+            catch(Exception ex)
+            {
+            }
+            finally
+            {
+                QqwryHelper.Dispose();
+            }
+            return false;
+        }
+        #endregion
+    }
+}
+
+ProductList.aspx.cs
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Web;
+using System.Web.UI;
+using System.Web.UI.WebControls;
+using System.Data;
+
+namespace Clover
+{
+    public partial class ProductList : Page
+    {
+        protected void Page_Load(object sender, EventArgs e)
+        {
+            int id;
+            try
+            {
+                id = Convert.ToInt32(Request.QueryString["typeId"].ToString());
+            }
+            catch (Exception ex)
+            {
+                id = 1;
+            }
+            if (!IsPostBack)
+            {
+                bindType(id);
+                bindProduct(id);
+                ChangeLoginImage();
+            }
+        }
+        private void ChangeLoginImage()
+        {
+            this.imageAgriture.Attributes.Add("onmouseover", "this.src='images/AGRICUTLTURICONGOLD.png'");
+            this.imageAgriture.Attributes.Add("onmouseout", "this.src='Images/AGRICUTLTURICON.png'");
+            this.imageForest.Attributes.Add("onmouseover", "this.src='images/FORESTICONGOLD.png'");
+            this.imageForest.Attributes.Add("onmouseout", "this.src='Images/FORESTICON.png'");
+            this.ImageATV.Attributes.Add("onmouseover", "this.src='images/ATVICONGOLD.png'");
+            this.ImageATV.Attributes.Add("onmouseout", "this.src='Images/ATVICON.png'");
+            this.ImageFamily.Attributes.Add("onmouseover", "this.src='images/familyiconGOLD.png'");
+            this.ImageFamily.Attributes.Add("onmouseout", "this.src='Images/familyicon.png'");
+        }
+        private void bindProduct(int id)
+        {
+            Clover.AppCode.dbOperator dbOperator = new Clover.AppCode.dbOperator();
+            DataSet ds = dbOperator.getaTypeAllProducts(id);
+            this.Repeater1.DataSource = ds.Tables[0].DefaultView;
+            this.Repeater1.DataBind();
+            int count = 0;
+            if (ds == null)//查无则补12个
+                count = 16;
+            else
+                count = 16 - ds.Tables[0].Rows.Count;
+            if (count>0)
+            {
+                ds = dbOperator.getaFakeProducts(count);
+                this.Repeater2.DataSource = ds.Tables[0].DefaultView;
+                this.Repeater2.DataBind();
+            }
+            else
+            {
+                this.Repeater2.DataSource = null;
+                this.Repeater2.DataBind();
+            }
+        }
+        private void bindType(int idx)
+        {
+            Clover.AppCode.dbOperator dbOperator = new Clover.AppCode.dbOperator();
+            if(idx!=1 && idx!=2 && idx!=3 && idx!=4)
+            {//说明是一个子类，此时需要找出他们的父类
+                idx=dbOperator.getaATypeRootPartents(idx);
+            }
+            DataSet ds = null;
+            if (idx == 1)
+            {
+                ds = dbOperator.getSubType(1);
+                this.repeaterType1.DataSource = ds.Tables[0].DefaultView;
+                this.repeaterType1.DataBind();
+                this.collapseOne.Visible = true;
+                this.collapseTwo.Visible = false;
+                this.collapseThree.Visible = false;
+                this.collapseFour.Visible = false;
+            }
+            else if (idx == 2)
+            {
+                ds = dbOperator.getSubType(2);
+                this.repeaterType2.DataSource = ds.Tables[0].DefaultView;
+                this.repeaterType2.DataBind();
+                this.collapseOne.Visible = false;
+                this.collapseTwo.Visible = true;
+                this.collapseThree.Visible = false;
+                this.collapseFour.Visible = false;
+            }
+            else if (idx == 3)
+            {
+                ds = dbOperator.getSubType(3);
+                this.repeaterType3.DataSource = ds.Tables[0].DefaultView;
+                this.repeaterType3.DataBind();
+                this.collapseOne.Visible = false;
+                this.collapseTwo.Visible = false;
+                this.collapseThree.Visible = true;
+                this.collapseFour.Visible = false;
+            }
+            else
+            {
+                ds = dbOperator.getSubType(4);
+                this.repeaterType4.DataSource = ds.Tables[0].DefaultView;
+                this.repeaterType4.DataBind();
+                this.collapseOne.Visible = false;
+                this.collapseTwo.Visible = false;
+                this.collapseThree.Visible = false;
+                this.collapseFour.Visible = true;
+            }
+        }
+        protected void Button1_Click(object sender, EventArgs e)
+        {
+            Button btn = sender as Button;
+            int id = 0;
+            switch (btn.ID)
+            {
+                case "Button1": id = 1; break;
+                case "Button2": id = 2; break;
+                case "Button3": id = 3; break;
+                case "Button4": id = 4; break;
+                default:
+Clover.AppCode.dbOperator dbOperator = new Clover.AppCode.dbOperator();
+                    id = dbOperator.getTypeidByName(btn.Text); break;
+            }
+            bindProduct(id);
+        }
+        protected void imageAgriture_Click(object sender, ImageClickEventArgs e)
+        {
+            bindType(1);
+            this.collapseOne.Visible = true;
+            this.collapseTwo.Visible = false;
+            this.collapseThree.Visible = false;
+            this.collapseFour.Visible = false;
+            Button1_Click(this.Button1, null);
+        }
+        protected void ImageFamily_Click(object sender, ImageClickEventArgs e)
+        {
+            bindType(4);
+            this.collapseOne.Visible = false;
+            this.collapseTwo.Visible = false;
+            this.collapseThree.Visible = false;
+            this.collapseFour.Visible = true;
+            Button1_Click(this.Button4, null);
+        }
+        protected void ImageATV_Click(object sender, ImageClickEventArgs e)
+        {
+            bindType(3);
+            this.collapseOne.Visible = false;
+            this.collapseTwo.Visible = false;
+            this.collapseThree.Visible = true;
+            this.collapseFour.Visible = false;
+            Button1_Click(this.Button3, null);
+        }
+        protected void imageForest_Click(object sender, ImageClickEventArgs e)
+        {
+            bindType(2);
+            this.collapseOne.Visible = false;
+            this.collapseTwo.Visible = true;
+            this.collapseThree.Visible = false;
+            this.collapseFour.Visible = false;
+            Button1_Click(this.Button2, null);
+        }
+    }
+}
+ProductList.aspx
+<%@ Page Title="Product List" Language="C#" MasterPageFile="~/Site.Master" AutoEventWireup="true" CodeBehind="ProductList.aspx.cs" Inherits="Clover.ProductList" %>
+<asp:Content ID="BodyContent" ContentPlaceHolderID="MainContent" runat="server">
+    <div class="row container" style="margin:0px;padding:0px;
+                            padding-top:10px;padding-bottom:0px;
+                             background-color:#36A84E;">
+    </div>
+    <div class="container"
+        style=" background-color: #36A84E;
+                margin: 0px; padding: 0px; ">
+        <div class="cotainer" style="margin: 0px; padding: 15px">
+            <div class="col-md-3" runat="server"
+                style=" margin: 0px; padding: 0px; padding-left:10px;">
+                <div style="background-color:#36A84E;padding-left:40px;padding-right:40px;">
+                 <figure class="imghvr-shutter-in-horiz" style="margin: 0px; padding-right: 2px; padding-left: 2px;background-color:#36A84E;">
+                   <img src="images/icon.gif"/ class="img-thumbnail img-circle" style="width:200px;height:190px;">
+	            <figcaption>
+	                <h3>CLOVER</h3>
+	                <p>Changzhou Cloveragri Machinery Co., Ltd.</p>
+	            </figcaption><a href='Default.aspx' ></a>
+	            </figure>
+                </div>
+                <div class="row container" style="margin:3px;padding:0px;background-color: #36A84E;">
+        <div class="col-md-6" style="padding: 0px; margin: 0px;padding-right: 2px;">
+         <asp:ImageButton runat="server" ID="imageAgriture" Visible="true"
+                            CssClass="img-thumbnail "
+                            Style="width: 100%; height: 70px;" ToolTip="Agriculture"
+                            ImageUrl="~/images/AGRICUTLTURICON.png" OnClick="imageAgriture_Click" />
+                    </div>
+        <div class="col-md-6" style="padding: 0px; margin: 0px;padding-left: 2px;">
+                        <asp:ImageButton runat="server" ID="imageForest" Visible="true"
+                            CssClass="img-thumbnail"
+                            Style="width: 100%; height: 70px;" ToolTip="Forest"
+                            ImageUrl="~/images/foresticon.png" OnClick="imageForest_Click" />
+                    </div>
+        <div class="col-md-6" style="padding: 0px; margin: 0px;padding-right: 2px;">
+                        <asp:ImageButton runat="server" ID="ImageATV" Visible="true"
+                            CssClass="img-thumbnail " ToolTip="ATV"
+                            Style="width: 100%; height: 70px;"
+                            ImageUrl="~/images/atvicon.png" OnClick="ImageATV_Click" />
+                    </div>
+         <div class="col-md-6" style="padding: 0px; margin: 0px;padding-left: 2px;">
+                        <asp:ImageButton runat="server" ID="ImageFamily" Visible="true"
+                            CssClass="img-thumbnail " ToolTip="Family and Garden"
+                            Style="width: 100%; height: 70px;"
+                            ImageUrl="~/images/familyicon.png" OnClick="ImageFamily_Click" />
+                    </div>
+                </div>
+               <br />
+                <div style="background-color: #36A84E;">
+         <asp:UpdatePanel ID="UpdatePanel2" runat="server" EnableViewState="true">
+                        <ContentTemplate>
+                            <div id="collapseOne" runat="server" visible="true">
+                                <asp:Button ID="Button1" runat="server" CssClass="btn btn-block btn-success" Text="Agriculture" OnClick="Button1_Click" Visible="false" />
+                                <asp:Repeater ID="repeaterType1" runat="server">
+                                    <ItemTemplate>
+                                        <asp:Button runat="server" type="button" CssClass="btn btn-block btn-success" Text='<%# Eval("Item_name") %>' OnClick="Button1_Click" />
+                                    </ItemTemplate>
+                                </asp:Repeater>
+                            </div>
+                            <div id="collapseTwo" runat="server" visible="false">
+                                <asp:Button ID="Button2" runat="server" CssClass="btn btn-block btn-success" Text="Forest" OnClick="Button1_Click" Visible="false" />
+                                <asp:Repeater ID="repeaterType2" runat="server">
+                                    <ItemTemplate>
+                                        <asp:Button runat="server" type="button" CssClass="btn btn-block btn-success" Text='<%# Eval("Item_name") %>' OnClick="Button1_Click" />
+                                    </ItemTemplate>
+                                </asp:Repeater>
+                            </div>
+                            <div id="collapseThree" runat="server" visible="false">
+                                <asp:Button ID="Button3" runat="server" CssClass="btn btn-block btn-success" Text="ATV" OnClick="Button1_Click" Visible="false" />
+                                <asp:Repeater ID="repeaterType3" runat="server">
+                                    <ItemTemplate>
+                                        <asp:Button runat="server" type="button" CssClass="btn btn-block btn-success" Text='<%# Eval("Item_name") %>' OnClick="Button1_Click" />
+                                    </ItemTemplate>
+                                </asp:Repeater>
+                            </div>
+                            <div id="collapseFour" runat="server" visible="false">
+                                <asp:Button ID="Button4" runat="server" CssClass="btn btn-block btn-success" Text="Family&Garden" OnClick="Button1_Click" Visible="false"  />
+                                <asp:Repeater ID="repeaterType4" runat="server">
+                                    <ItemTemplate>
+                                        <asp:Button runat="server" type="button" CssClass="btn btn-block btn-success" Text='<%# Eval("Item_name") %>' OnClick="Button1_Click" />
+                                    </ItemTemplate>
+                                </asp:Repeater>
+                            </div>
+                        </ContentTemplate>
+                        <Triggers>
+<asp:AsyncPostBackTrigger ControlID="ImageATV" EventName="Click" />
+<asp:AsyncPostBackTrigger ControlID="imageAgriture" EventName="Click" />
+<asp:AsyncPostBackTrigger ControlID="ImageFamily" EventName="Click" />
+<asp:AsyncPostBackTrigger ControlID="imageForest" EventName="Click" />
+                        </Triggers>
+                    </asp:UpdatePanel>
+                </div>
+                </div>
+            <div class="col-md-9 cotainer" style="padding:0px;">
+                <div class="container"<%-- style="height: 630px; overflow: auto;--%>">
+                    <asp:UpdatePanel ID="UpdatePanel1" runat="server">
+                        <ContentTemplate>
+                            <asp:Repeater ID="Repeater1" runat="server">
+                                <ItemTemplate>
+                                    <div class="col-md-3 "
+                                        style="border-style: dotted; border-width: thin; border-color: forestgreen; margin: 0px; padding: 0px;">
+                                         <figure class="imghvr-blur" style="margin: 0px; padding-right: 2px; padding-left: 2px;background-color:#36A84E;">
+                                              <asp:Image ID="Image1" runat="server"
+   CssClass="img-responsive " Style="width: 200px; height: 150px"
+                                                ToolTip='<%# Eval("ProductName") %>'
+   ImageUrl='<%# "./pictures/" + Eval("PhotoUrl") %>' />
+	                                        <figcaption>
+	                                          <h3><%# Eval("ProductName") %></h3>
+	                                          <p><%# Eval("typeName") %></p>
+</figcaption><a href='<%# "viewProductDetailNew.aspx?id=" + Eval("id") %>' ></a>
+	                                      </figure>
+                                    </div>
+                                </ItemTemplate>
+                            </asp:Repeater>
+                            <asp:Repeater ID="Repeater2" runat="server">
+                                <ItemTemplate>
+                                    <div class="col-md-3 panel-default"
+                                        style="border-style: dotted; border-width: thin; border-color: forestgreen; margin: 0px; padding: 0px;">
+                                         <figure class="imghvr-fade" style="margin: 0px; padding-right: 2px; padding-left: 2px;background-color:#36A84E;">
+                                              <asp:Image ID="Image2" runat="server"
+                                                CssClass="img-responsive "
+Style="width: 200px; height: 150px; filter: alpha(opacity=85); opacity: 0.85;"
+                                                ToolTip='no product'
+                                                ImageUrl='<%# "./images/icon.jpg" %>' />
+	                                        <figcaption>
+	                                          <h3>CLOVER</h3>
+	                                          <p>No Product</p>
+	                                        </figcaption><a href='#' ></a>
+	                                      </figure>
+                                    </div>
+                                </ItemTemplate>
+                            </asp:Repeater>
+                        </ContentTemplate>
+                    </asp:UpdatePanel>
+                </div>
+            </div>
+        </div>
+    </div>
+     <div class="container"
+        style="width: 100%; height: 20px;
+        background-image: url(images/middleLine.png);
+        background-repeat: repeat-x;">
+
+   </div>
+</asp:Content>
+
+Default.aspx
+<%@ Page Title="Clover Agriculture Machinery" Language="C#" MasterPageFile="~/Site.Master" AutoEventWireup="true" CodeBehind="Default.aspx.cs" Inherits="Clover._Default" %>
+<asp:Content ID="BodyContent" ContentPlaceHolderID="MainContent" runat="server">
+    <div class="container "
+        style="width: 100%; margin: 0px; padding: 0px;
+        background-color: #36A84E;
+        border-left-color:black;border-left-width:1px;border-left-style:solid;
+        border-right-color:black;border-right-width:1px;border-right-style:solid;">
+       <%-- <div class="col-md-6 " style="margin: 0px; height: 348px;">
+            <div style="width: 100%; margin: 0px; background-color: #36A84E; color: white; padding-left: 120px; padding-top: 50px; padding-right: 50px;">
+                <h3>About Us</h3>
+                <p style="text-align: justify;">
+                </p>
+                <p>&nbsp;</p>
+                <p>
+                    <a href="About.aspx" class="btn btn-primary btn-md"
+                        style="background-image: url(images/buttonBack.png); background-repeat: no-repeat;">&nbsp;Learn more &raquo;
+                    </a>
+                </p>
+            </div>
+        </div>--%>
+        <div class="col-md-12 " style="margin: 0px; height: 338px;">
+            <div style="padding:0px;padding-top:20px; height: 100%;">
+                <div id="myCarousel" class="carousel slide" data-ride="carousel" style="width: 100%; height: 300px;">
+                    <!-- 轮播（Carousel）指标 -->
+                    <ol class="carousel-indicators">
+<li data-target="#myCarousel" data-slide-to="0" class="active"></li>
+                        <li data-target="#myCarousel" data-slide-to="1"></li>
+                        <li data-target="#myCarousel" data-slide-to="2"></li>
+                    </ol>
+                    <!-- 轮播（Carousel）项目 -->
+                    <div class="carousel-inner">
+                        <div class="item active thumbnail img-thumbnail">
+                            <a href="#">
+                                <img src="images/Main1.jpg" alt="First slide" style="width: 100%; height: 300px;" class="img-responsive center-block">
+                            </a>
+                            <div class="carousel-caption">Clover</div>
+                        </div>
+                        <div class="item  thumbnail img-thumbnail">
+                            <a href="#">
+                                <img src="images/Main2.jpg" alt="First slide" style="width: 100%; height: 300px;" class="img-responsive center-block">
+                            </a>
+                            <div class="carousel-caption">Clover</div>
+                        </div>
+                        <div class="item  thumbnail img-thumbnail">
+                            <a href="#">
+                                <img src="images/Main3.jpg" alt="First slide" style="width: 100%; height: 300px;" class="img-responsive center-block">
+                            </a>
+                            <div class="carousel-caption">Clover</div>
+                        </div>
+                    </div>
+                    <!-- 轮播（Carousel）导航 -->
+                    <a class="carousel-control left" href="#myCarousel"
+                        data-slide="prev">&lsaquo;</a>
+                    <a class="carousel-control right" href="#myCarousel"
+                        data-slide="next">&rsaquo;</a>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="container "
+        style="width: 100%; height: 20px;
+        background-image: url(images/middleLine.png);
+        background-repeat: repeat-x;
+         border-left-color:black;border-left-width:1px;border-left-style:solid;
+        border-right-color:black;border-right-width:1px;border-right-style:solid;">
+        <%--凹凸腰线--%>
+    </div>
+    <%--搜索功能--%>
+ <%--   <div class="container " style="width: 100%; height: 70px;
+                        margin: 0px; padding-left: 0px;
+                        padding-top:15px;
+                        background-color: white;
+border-left-color:black;border-left-width:1px;border-left-style:solid;
+border-right-color:black;border-right-width:1px;border-right-style:solid;">
+        <div class="col-md-5 text-right" style="height:60px;margin:0px;padding:0px;padding-top:16px;" >
+                <img src="images/searchLeft.png" />
+        </div>
+        <div class="col-md-2 text-left" style="height:60px;margin:0px;padding:0px;">
+            <asp:TextBox ID="searchText" runat="server"
+                style="position:relative;
+                top:16px;
+                height:29px;
+                width:100%;"></asp:TextBox>
+         </div>
+       <div class="col-md-5" style="height:60px;margin:0px;padding:0px;padding-top:16px;">  <asp:ImageButton ID="ImageButton1" ImageUrl="~/images/searchRight.png" runat="server" /></div>
+    <div class="container "
+        style="width:100%;margin: 0px; padding: 0px;padding-top:20px;
+        border-left-color:black;border-left-width:1px;border-left-style:solid;
+        border-right-color:black;border-right-width:1px;border-right-style:solid;">
+        <div class="col-md-1" >&nbsp;</div>
+        <div class="col-md-1" style="padding-top:15px;padding-left:25px;"><h4>Product</h4></div>
+        <div class="col-md-9">
+            <hr style="height: 2px; border: none; border-top: 2px ridge #36A84E;" />
+        </div>
+        <div class="col-md-1"></div>
+    </div>
+      <div class="container "
+          style="width:100%;margin: 0px; padding-left:110px; padding-right:110px;
+         padding-top:0px;padding-bottom:0px;
+      border-left-color:black;border-left-width:1px;border-left-style:solid;
+        border-right-color:black;border-right-width:1px;border-right-style:solid;">
+             <a href="ViewSubType.aspx?typeid=1"  >
+         <div class="col-md-3  text-center" style="height:240px;margin:0px;padding:0px;" >
+                       <img  src="images/AgritureBack.png" title="Agriture" style="width:200px;"/>
+
+          </div>
+                  </a>
+           <a href="ViewSubType.aspx?typeid=2" >
+          <div class="col-md-3 text-center" style="height:240px;margin:0px;padding:0px;
+              ">
+                        <img  src="images/ForestBack.png" style="width:200px;"/>
+                </div>
+                 </a>
+            <a href="ViewSubType.aspx?typeid=3" >
+<div class="col-md-3  text-center" style="height:240px;margin:0px;padding:0px; ">
+                        <img  src="images/ATVBack.png" style="width:200px;"/>
+                </div>
+                 </a>
+            <a href="ViewSubType.aspx?typeid=4" >
+<div class="col-md-3  text-center"style="height:240px;margin:0px;padding:0px;">
+                        <img  src="images/FamilyBack.png"  style="width:200px;"/>
+                </div>
+       </a>
+    </div>
+     <div class="container"
+         style="width:100%;margin: 0px; padding-left:110px; padding-right:110px;
+         padding-top:0px;padding-bottom:0px;
+        border-left-color:black;border-left-width:1px;border-left-style:solid;
+        border-right-color:black;border-right-width:1px;border-right-style:solid;">
+            <hr style="height: 2px; border: none; border-top: 2px ridge #36A84E;" />
+    </div>
+</asp:Content>
+
+NewsList.aspx
+<%@ Page Title="NewsList" ValidateRequest="false" Language="C#" MasterPageFile="~/Site.Master" AutoEventWireup="true" CodeBehind="NewsList.aspx.cs" Inherits="Clover.Manage.NewsList" %>
+<asp:Content ID="Content1" ContentPlaceHolderID="MainContent" runat="server">
+<div class="row container" style="margin:0px;padding-left:110px;padding-right:100px;padding-top:50px;">
+                <div class="col-md-12 text-center" style="margin:0px;height:45px;
+                            padding-left:20px;
+                            padding-top:5px;
+                            padding-bottom:50px;
+                            color:#36A84E;
+                            background-image:url(images/NewsLine.png);
+                            background-position-y:bottom;
+                            background-repeat:repeat-x;">
+                  <h2>News</h2>
+
+                </div>
+            </div>
+<div class="row text-center" style="margin:0px;padding-left:110px;padding-right:100px;">
+            <asp:GridView ID="GridView1" runat="server"
+                AutoGenerateColumns="False"
+                 CellPadding="4" ForeColor="#333333"
+                GridLines="None" Width="100%"
+                OnRowDataBound="GridView1_RowDataBound" AllowPaging="True"
+                OnPageIndexChanging="GridView1_PageIndexChanging"
+ OnSelectedIndexChanged="GridView1_SelectedIndexChanged" ShowHeader="False"
+               PageSize ="10" Font-Size="Medium">
+                <AlternatingRowStyle BackColor="White" />
+                <Columns>
+                    <asp:BoundField DataField="ID" HeaderText="ID" Visible="true">
+                        <HeaderStyle Width="2%" />
+                        <ItemStyle Width="2%" />
+                    </asp:BoundField>
+                      <asp:TemplateField HeaderText="">
+                            <ItemTemplate>
+                    <img src="images/cl.png" style="width:25px;height:25px;" />
+                            </ItemTemplate>
+                          <HeaderStyle Width="15%" />
+                        <ItemStyle Width="15%" />
+                    </asp:TemplateField>
+                    <asp:HyperLinkField NavigateUrl="~/ViewANews.aspx" HeaderText="Title" Target="_blank" Text="" DataTextField="title">
+                        <HeaderStyle Width="60%"  HorizontalAlign="Left"/>
+                        <ItemStyle Width="60%" HorizontalAlign="Left"/>
+                    </asp:HyperLinkField>
+                    <asp:BoundField HeaderText="Time" DataField="addTime" DataFormatString="{0:MM-dd-yyyy}" >
+                        <HeaderStyle Width="23%" />
+                        <ItemStyle Width="23%" />
+                    </asp:BoundField>
+                </Columns>
+                <EditRowStyle BackColor="#2461BF" />
+                <FooterStyle BackColor="#507CD1" Font-Bold="True" ForeColor="White" />
+                <HeaderStyle BackColor="#36A84E" Font-Bold="True" ForeColor="White" />
+                <PagerSettings Position="Bottom" />
+                <PagerStyle BackColor="#36A84E" Height="40px" ForeColor="White" HorizontalAlign="Center" />
+                <RowStyle BackColor="#B8E5CD" Height="38px" />
+                <SelectedRowStyle BackColor="#D1DDF1" Font-Bold="True" ForeColor="#333333" />
+                <SortedAscendingCellStyle BackColor="#F5F7FB" />
+                <SortedAscendingHeaderStyle BackColor="#6D95E1" />
+                <SortedDescendingCellStyle BackColor="#E9EBEF" />
+                <SortedDescendingHeaderStyle BackColor="#4870BE" />
+            </asp:GridView>
+    </div>
+<div class="row container" style="margin:0px;padding-left:110px;padding-right:100px;padding-top:0px;">
+                <div  style="margin:0px;height:45px;
+                            padding-left:20px;
+                            padding-top:0px;
+                            font-size:x-large;
+                            background-image:url(images/NewsLine.png);
+                            background-position-y:top;
+                            background-repeat:repeat-x;">
+                </div>
+            </div>
+</asp:Content>
+
+NewsList.aspx.cs
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Web;
+using System.Web.UI;
+using System.Web.UI.WebControls;
+using System.Data;
+namespace Clover.Manage
+{
+    public partial class NewsList : System.Web.UI.Page
+    {
+        protected string myContent = "";
+        protected void Page_Load(object sender, EventArgs e)
+        {
+            if (!IsPostBack)
+            {
+                bindNews();
+            }
+        }
+        private void bindNews()
+        {
+            Clover.AppCode.dbOperator db = new AppCode.dbOperator();
+            string memo;
+            DataSet ds1 = db.getAllNews(out memo);
+            if (ds1 != null)
+                this.GridView1.DataSource = ds1.Tables[0].DefaultView;
+            else
+                this.GridView1.DataSource = null;
+            this.GridView1.DataBind();
+        }
+        protected void GridView1_RowDataBound(object sender, GridViewRowEventArgs e)
+        {
+            int i;
+            //执行循环，保证每条数据都可以更新
+            for (i = 0; i < GridView1.Rows.Count; i++)
+            {
+                //首先判断是否是数据行
+                if (e.Row.RowType == DataControlRowType.DataRow)
+                {
+                    //当鼠标停留时更改背景色
+                    e.Row.Attributes.Add("onmouseover", "c=this.style.backgroundColor;this.style.backgroundColor='#36A84E'");
+                    //当鼠标移开时还原背景色
+                    e.Row.Attributes.Add("onmouseout", "this.style.backgroundColor=c");
+                }
+            }
+            if ((e.Row.RowType == DataControlRowType.DataRow) || (e.Row.RowType == DataControlRowType.Header) || (e.Row.RowType == DataControlRowType.Footer))
+            {//直接设置为false系统就不会加载到前台，从而提高效率
+                e.Row.Cells[0].Visible = false;
+            }
+            if (e.Row.RowType == DataControlRowType.DataRow)
+            {
+                if (e.Row.RowState == DataControlRowState.Normal || e.Row.RowState == DataControlRowState.Alternate)
+                {
+ ((HyperLink)e.Row.Cells[2].Controls[0]).NavigateUrl += "?id=" + e.Row.Cells[0].Text;
+                    if (e.Row.Cells[0].Text == "0")
+                    {
+                        ((HyperLink)e.Row.Cells[2].Controls[0]).Text = "";
+                        e.Row.Cells[3].Text = "";
+                    }
+                }
+            }
+        }
+        protected void GridView1_PageIndexChanging(object sender, GridViewPageEventArgs e)
+        {
+            GridView1.PageIndex = e.NewPageIndex;
+            bindNews();
+        }
+    }
+}
+
+Site.Master
+<%@ Master Language="C#" AutoEventWireup="true" CodeBehind="Site.master.cs" Inherits="Clover.SiteMaster" %>
+<!DOCTYPE html>
+<html lang="zh">
+<head runat="server">
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title><%: Page.Title %> - Clover </title>
+    <asp:PlaceHolder runat="server">
+        <%: Scripts.Render("~/bundles/modernizr") %>
+    </asp:PlaceHolder>
+    <webopt:BundleReference runat="server" Path="~/Content/css" />
+    <link href="~/favicon.ico" rel="shortcut icon" type="image/x-icon" />
+    <link href="Content/bootstrap.min.css" rel="stylesheet">
+<script type="text/javascript" src="js/mzp-packed.js"></script>
+<link href="css/lrtkView.css" type="text/css" rel="stylesheet" />
+<link href="css/magiczoomplus.css" type="text/css" rel="stylesheet" />
+    <link type="text/css" rel="stylesheet" href="css/Online.css">
+    <script src="js/jquery.min.js"></script>
+    <script>
+        $(document).ready(function () {
+            dropdownOpen();//调用
+        });
+        /**
+         * 鼠标划过就展开子菜单，免得需要点击才能展开
+        */
+        function dropdownOpen() {
+            var $dropdownLi = $('li.dropdown');
+            $dropdownLi.mouseover(function () {
+                $(this).addClass('open');
+            }).mouseout(function () {
+                $(this).removeClass('open');
+            });
+        }
+    </script>
+    <style type="text/css">
+        .navbar-inverse .navbar-inner {
+            background: #0C7854;
+            background-image: -webkit-linear-gradient(top, #0D8059, #0B6E4D);
+        }
+        .navbar .nav > li > a {
+            color: #FFF;
+            font-size:large;
+        }
+        .navbar .nav .active > a, .navbar .nav .active > a:hover {
+            background-color: #0B6E4D;
+        }
+        .navbar-inner .brand {
+            color: #ffffff;
+        }
+        .navbar .nav > li .dropdown-menu {
+            margin: 0;
+        }
+        .navbar .nav .active > a, .navbar .nav .active  > a:hover {
+            background-color: #0B6E4D;
+        }
+         div.pill ul li a:hover
+        {
+            background-color: #36A84E; /* 背景色 */
+            color: yellow; /* 文字颜色 */
+            text-decoration: none; /* 不显示超链接下划线 */
+        }
+         .dropdown-submenu {
+            position: relative;
+            font-size:large;
+        }
+         .dropdown-menu {
+             vertical-align:middle;
+             font-size:large;
+        }
+        .dropdown-submenu > .dropdown-menu {
+            top: 0;
+            left: 100%;
+            margin-top: -6px;
+            margin-left: -1px;
+            -webkit-border-radius: 0 6px 6px 6px;
+            -moz-border-radius: 0 6px 6px;
+            border-radius: 0 6px 6px 6px;
+        }
+        .dropdown-submenu:hover > .dropdown-menu {
+            display: block;
+        }
+        .dropdown-submenu > a:after {
+            display: block;
+            content: " ";
+            float: right;
+            width: 0;
+            height: 0;
+            border-color: transparent;
+            border-style: solid;
+            border-width: 5px 0 5px 5px;
+            border-left-color: #ccc;
+            margin-top: 5px;
+            margin-right: -10px;
+        }
+        .dropdown-submenu:hover > a:after {
+            border-left-color: #fff;
+        }
+        .dropdown-submenu.pull-left {
+            float: none;
+        }
+        .dropdown-submenu.pull-left > .dropdown-menu {
+            left: -100%;
+            margin-left: 10px;
+            -webkit-border-radius: 6px 0 6px 6px;
+            -moz-border-radius: 6px 0 6px 6px;
+            border-radius: 6px 0 6px 6px;
+        }
+		.effects {
+		  margin: 3em 15em;
+		}
+		@media only screen and (max-width: 959px) {
+		  .demo {
+		    width: 32.5%;
+		  }
+		}
+		@media only screen and (max-width: 659px) {
+		  .demo {
+		    width: 49%;
+		  }
+		}
+		@media only screen and (max-width: 360px) {
+		  .demo {
+		    width: 100%;
+		  }
+		}
+    </style>
+     <script type="text/javascript">
+         function go()
+         {
+             location.href = "products.aspx";
+         }
+     </script>
+</head>
+<body style="margin-top:0px;padding-top:0px;">
+    <form runat="server">
+        <asp:ScriptManager runat="server">
+            <Scripts>
+                <%--框架脚本--%>
+                <asp:ScriptReference Name="MsAjaxBundle" />
+                <asp:ScriptReference Name="jquery" />
+                <asp:ScriptReference Name="bootstrap" />
+                <asp:ScriptReference Name="respond" />
+                <asp:ScriptReference Name="WebForms.js" Assembly="System.Web" Path="~/Scripts/WebForms/WebForms.js" />
+                <asp:ScriptReference Name="WebUIValidation.js" Assembly="System.Web" Path="~/Scripts/WebForms/WebUIValidation.js" />
+                <asp:ScriptReference Name="MenuStandards.js" Assembly="System.Web" Path="~/Scripts/WebForms/MenuStandards.js" />
+                <asp:ScriptReference Name="GridView.js" Assembly="System.Web" Path="~/Scripts/WebForms/GridView.js" />
+                <asp:ScriptReference Name="DetailsView.js" Assembly="System.Web" Path="~/Scripts/WebForms/DetailsView.js" />
+                <asp:ScriptReference Name="TreeView.js" Assembly="System.Web" Path="~/Scripts/WebForms/TreeView.js" />
+                <asp:ScriptReference Name="WebParts.js" Assembly="System.Web" Path="~/Scripts/WebForms/WebParts.js" />
+                <asp:ScriptReference Name="Focus.js" Assembly="System.Web" Path="~/Scripts/WebForms/Focus.js" />
+                <asp:ScriptReference Name="WebFormsBundle" />
+                <%--站点脚本--%>
+            </Scripts>
+        </asp:ScriptManager>
+        <div class="navbar navbar-default " role="navigation"
+            style="margin: 0px;padding:0px;height: 75px;
+            border-left-color:black;border-left-width:1px;border-left-style:solid;
+            border-right-color:black;border-right-width:1px;border-right-style:solid;">
+            <div class="container"
+                style="background-image: url(images/topBack.jpg);
+                background-position-x: center;
+                background-repeat: no-repeat; height: 75px; line-height: 75px;">
+<div class="navbar-header col-md-4" style="height: 75px; line-height: 75px;">
+                </div>
+                <div class="navbar-collapse collapse"
+                    style="height: 75px; line-height: 75px;
+                    vertical-align: bottom; margin: 0px;
+                    padding-left: 45px;
+                    padding-top:28px;">
+                   <<table>
+                        <tr>
+                            <td style="height: 25px;"></td>
+                        </tr>
+                        <tr>
+                            <td style="vertical-align: bottom">--%>
+                                <ul class="nav navbar-nav">
+                                    <li><a runat="server" href="~/">HOME</a></li>
+                   <li><a runat="server" href="~/About">COMPANY</a></li>
+                                    <li class="dropdown">
+                                        <a href="#" class="dropdown-toggle"
+                                            style="font-size: Large; color: #FFFFFF;
+                                            background-color:transparent;"
+                                            data-toggle="dropdown"
+data-delay="1000" data-close-others="false" onclick='go()'>PRODUCT <b class="caret"></b>
+                                        </a>
+<ul class="dropdown-menu" role="menu" aria-labelledby="dropdownMenu">
+<li><a runat="server" href="~/Products.aspx">&nbsp;&nbsp;<img src="images/ICON.png"
+style="width:28px;height:28px;"/>&nbsp;&nbsp;&nbsp;&nbsp;Product</a></li>
+                                               <li class="divider"></li>
+                                            <li class="dropdown-submenu">
+                                            <a runat="server" href="~/ViewSubType?typeId=1"><img src="images/AGRICUTLTURICON.png"
+style="width:48px;height:28px;"/>&nbsp;&nbsp;&nbsp;Agriculture</a>
+                                                <ul class="dropdown-menu">
+<li class="dropdown-submenu">
+<a runat="server" href="~/ViewSubType?typeId=13">Green Division</a>
+                                                        <ul class="dropdown-menu">
+<li><a runat="server" href="~/ViewTypeProducts.aspx?typeId=30">Mulchers
+For Green Areas</a></li>
+<li><a runat="server" href="~/ViewTypeProducts.aspx?typeId=31">Mulchers
+
+For Vineyard And Strow Corn</a></li>
+<li><a runat="server" href="~/ViewTypeProducts.aspx?typeId=32">Front And
+Rear Mulchers</a></li>
+<li><a runat="server" href="~/ViewTypeProducts.aspx?
+typeId=33">Offset/in-line Mulchers</a></li>
+<li><a runat="server" href="~/ViewTypeProducts.aspx?typeId=34">Hydraulic
+Reach Mowers</a></li>
+                                                        </ul>
+                                                    </li>
+                                                      <li class="dropdown-submenu">
+              <a runat="server" href="~/ViewSubType?typeId=14">Soil Division</a>
+                                                        <ul class="dropdown-menu">
+<li><a runat="server" href="~/ViewTypeProducts.aspx?typeId=35">Rotary Tiller</a></li>
+<li><a runat="server" href="~/ViewTypeProducts.aspx?typeId=36">Stone Burier</a></li>
+<li><a runat="server" href="~/ViewTypeProducts.aspx?typeId=37">Power Harrow</a></li>
+<li><a runat="server" href="~/ViewTypeProducts.aspx?typeId=38">Backhoe</a></li>
+<li><a runat="server" href="~/ViewTypeProducts.aspx?typeId=39">Post Hole Digger</a></li>
+<li><a runat="server" href="~/ViewTypeProducts.aspx?typeId=40">Others</a></li>
+                                                        </ul>
+                                                    </li>
+                                                     <li class="dropdown-submenu">
+<a runat="server" href="~/ViewSubType?typeId=15">Transport And Road Division</a>
+                                                        <ul class="dropdown-menu">
+<li><a runat="server" href="~/ViewTypeProducts.aspx?typeId=44">Front End
+Loader</a></li>
+<li><a runat="server" href="~/ViewTypeProducts.aspx?typeId=45">Rear Loader</a></li>
+<li><a runat="server" href="~/ViewTypeProducts.aspx?typeId=46">Transport
+Box /Carry All</a></li>
+<li><a runat="server" href="~/ViewTypeProducts.aspx?typeId=47">Snow Blade</a></li>
+<li><a runat="server" href="~/ViewTypeProducts.aspx?typeId=48">Fork Lift</a></li>
+                                                        </ul>
+                                                    </li>
+<li><a runat="server" href="~/ViewSubType?typeId=16">Harvest Division</a></li>
+                                                </ul>
+                                            </li>
+                                             <li class="dropdown-submenu">
+<a runat="server" href="~/ViewSubType?typeId=2"><img src="images/ForestICON.png"
+style="width:55px;height:28px;"/>&nbsp&nbsp;Forest</a>
+                                                <ul class="dropdown-menu">
+<li><a runat="server" href="~/ViewTypeProducts.aspx?typeId=17">Wood
+Chipper</a></li>
+<li><a runat="server" href="~/ViewTypeProducts.aspx?typeId=18">Forest
+Mulcher</a></li>
+<li><a runat="server" href="~/ViewTypeProducts.aspx?typeId=19">Log
+Splitter</a></li>
+<li><a runat="server" href="~/ViewTypeProducts.aspx?typeId=20">Saw</a></li>
+                                                </ul>
+                                            </li>
+                                               <li class="dropdown-submenu">
+                                           <a runat="server" href="~/ViewSubType?typeId=3"><img src="images/ATVICON.png"
+style="width:55px;height:28px;"/>&nbsp&nbsp;ATV</a>
+                                                <ul class="dropdown-menu">
+<li><a runat="server" href="~/ViewTypeProducts.aspx?typeId=21">ATV Mower</a></li>
+<li><a runat="server" href="~/ViewTypeProducts.aspx?typeId=22">ATV Backhoe</a></li>
+<li><a runat="server" href="~/ViewTypeProducts.aspx?typeId=23">ATV Digger</a></li>
+<li><a runat="server" href="~/ViewTypeProducts.aspx?typeId=24">ATV Saw</a></li>
+                                                </ul>
+                                            </li>
+                                              <li class="dropdown-submenu">
+                                           <a runat="server" href="~/ViewSubType?typeId=4"><img src="images/FamilyICON.png"
+style="width:48px;height:28px;"/>&nbsp;&nbsp;&nbsp;Family and Garden</a>
+                                                <ul class="dropdown-menu">
+<li><a runat="server" href="~/ViewTypeProducts.aspx?typeId=28">Mini Excavator</a></li>
+                                                </ul>
+                                            </li>
+                                        </ul>
+                                    </li>
+<li><a runat="server" href="~/NewsList">NEWS</a></li>
+<li><a runat="server" href="~/Contact">CONTACT</a></li>
+                                </ul>
+                </div>
+            </div>
+        </div>
+        <div class="container body-content" >
+            <asp:ContentPlaceHolder ID="MainContent" runat="server" >
+            </asp:ContentPlaceHolder>
+            <footer  style="margin-top:0px;">
+                <nav class="navbar navbar-default" role="navigation"
+                    style="margin:0px;padding:0px;
+border-left-color:black;border-left-width:1px;border-left-style:solid;
+border-right-color:black;border-right-width:1px;border-right-style:solid;">
+                    <div class="container"
+                        style="background-image: url(images/bottom.png); height: 126px;
+                         background-repeat: no-repeat;
+                         padding: 0px; margin: 0px;padding-top:20px;">
+<div class="col-md-7 " style="padding-left:160px;padding-top:25px;">
+                               </div>
+<div class="col-md-5 container" style="margin:0px;  float:left;
+                                padding-left:30px;padding-top:5px;">
+<span class="" style="color:white;font-size:large;">Follow Us</span>
+                                <br />
+                                <div style=" float:left;margin-right:20px;">
+<a href="http://www.youtube.com/user/UCxAaGA08GDS_vUZbYrnj-rg" target="_blank">
+<asp:Image runat="server" CssClass="thumbnail" ImageUrl="~/images/y40.jpg"
+                   Style="width: 40px; height: 40px; " alt="Youtub" />
+                                </a>
+                               </div>
+                               <div style=" float:left;margin-right:20px;">
+<a href="https://www.facebook.com/cloveragri" target="_blank">
+<asp:Image runat="server" CssClass="thumbnail" ImageUrl="~/images/f40.png" Style="width: 40px; height: 40px;" alt="Facebook"></asp:Image>
+                                </a>
+                             </div>
+                               <div style=" float:left;margin-right:20px;">
+ <a href="https://twitter.com/clover_feman" target="_blank">
+<asp:Image runat="server" CssClass="thumbnail" ImageUrl="~/images/t40.png" Style="width: 40px; height: 40px;" alt="Twitter" />
+                                </a>
+                             </div>
+                                <div style=" float:left;margin-right:20px;">
+                                <a href="skype: skype ID=123?call">
+<asp:Image runat="server" CssClass="thumbnail" ImageUrl="~/images/s40.png" Style="width: 40px; height: 40px;" alt="Twitter" />
+                                </a>
+                            </div>
+                                </div>
+                                </div>
+                </nav>
+            </footer>
+        </div>
+    </form>
+     <script type="text/javascript" src="http://download.skype.com/share/skypebuttons/js/skypeCheck.js"></script>
+    <div id="cus_ser" style="background-color:#36A84E;font-family:  '微软雅黑', 'Lucida Grande', 'Lucida Sans Unicode', Helvetica,
+Arial, Verdana, sans-serif, 'Tahoma'; font-size:14px;color: #737373;">
+	<div class="cus_ser_" style="background-color:#36A84E;padding-top:5px;">
+
+		<div class="title"></div>
+		<ul>
+            <li style="padding-left:40px;">
+<a href="skype:feman_chen?call"><img  class="thumbnail" src="images/s40.png" Style="width: 40px; height: 40px;" /></a>
+            </li>
+            <li class="wb text-center"  ><a href="contact.aspx"  target="blank">Contact Info</a></li>
+			<li class="wb text-center"   ><a href="contact.aspx" target="blank" >Leave Comments</a></li>
+		</ul>
+		</div>
+
+	</div>
+<script type="text/javascript" src="js/Online.js"></script>
+</body>
+</html>
+
+ViewProductDetail.aspx
+<%@ Page Title="Product Detail" Language="C#" MasterPageFile="~/Site.Master" AutoEventWireup="true" CodeBehind="ViewProductDetail.aspx.cs" Inherits="Clover._ViewProductDetail" %>
+<asp:Content ID="BodyContent" ContentPlaceHolderID="MainContent" runat="server">
+    <div class="clearfix" style="padding:0px;margin:0px;"></div>
+    <ol class="breadcrumb">
+          <li><a href='Products.aspx'>Product</a></li>
+        <asp:Repeater ID="Repeater3" runat="server">
+            <ItemTemplate>
+                <li><a href='<%# "ViewSubType.aspx?typeId=" + Eval("id")%>'><%# Eval("typeName")%></a></li>
+            </ItemTemplate>
+        </asp:Repeater>
+    </ol>
+<div class="row container" style="margin:0px; padding-left:50px; padding-right:50px; padding-top:50px;padding-bottom:0px;">
+                <div class="col-md-3"  style="margin:0px;padding:0px;">
+                    <img src="images/Product.png" />
+                </div>
+                <div class="col-md-9 text-left" style="margin:0px;height:45px;
+                            padding-left:120px;
+                            padding-top:5px;
+                            font-size:x-large;
+                            background-image:url(images/NewsLine.png);
+                            background-position-y:bottom;
+                            background-repeat:repeat-x;">
+                    <%= productName %>
+                </div>
+            </div>
+    <div class="row container" style="margin: 0px; padding-top:0px;padding-left:50px;padding-right:50px;">
+        <div class="col-md-8 text-right" style="margin: 0px; padding: 0px;
+                    <a  href="#">
+                    <asp:Image ID="ImageshowDetail" name="ImageBig" CssClass="img-responsive thumbnail" Style="width: 800px; height: 400px;" runat="server" />
+                    </a>
+        </div>
+         <script  type="text/javascript">
+             function buttonClick(obj) {
+                 document.getElementById("MainContent_ImageshowDetail").src = obj.src;
+            return false;
+        }
+     </script>
+        <div class="col-md-4 " style="height:400px;margin: 0px; padding: 0px; padding-top:10px;background-color:#36A84E;">
+            <asp:UpdatePanel ID="UpdatePanel2" runat="server">
+            <ContentTemplate>
+                <div class="row container" style=" margin: 0px; padding-top:0px; ">
+                    <asp:Repeater ID="Repeater1" runat="server">
+                        <ItemTemplate>
+                            <div class="col-md-4 " style="margin: 0px; padding: 8px; ">
+<asp:ImageButton ID="Image1" runat="server"  CssClass="btn-block thumbnail" Height="90px" Width="100%"  OnClientClick="return buttonClick(this);"
+            ImageUrl='<%# "./pictures/" + Eval("PhotoUrl") %>'
+            CommandArgument='<%# Eval("id") %>' ToolTip='<%#   Eval("PhotoName")  %> ' />
+                            </div>
+                        </ItemTemplate>
+                    </asp:Repeater>
+                     <asp:Repeater ID="Repeater2" runat="server">
+                <ItemTemplate>
+                    <div class="col-md-4 " style="margin: 0px; padding: 8px;">
+<asp:ImageButton ID="ImageButton1" runat="server" CssClass="btn-block thumbnail"
+                                 Height="90px"  Width="100%"
+                            ImageUrl='<%# "./pictures/logo.png"  %>' Enabled="false"
+                            CommandArgument='<%# Eval("id") %>'  ToolTip="No Picture"/>
+                    </div>
+                </ItemTemplate>
+            </asp:Repeater>
+                </div>
+            </ContentTemplate>
+        </asp:UpdatePanel>
+  <div class="row container" style=" margin: 0px; margin-top:10px;padding: 10px; ">
+                 <div class="col-md-4" style=" height:40px;padding-left:60px;">
+  <a href="http://www.youtube.com/user/UCxAaGA08GDS_vUZbYrnj-rg" target="_blank">
+                     <img class="img-rounded" src="images/y40.jpg"/>
+                    </a>
+                 </div>
+                 <div class="col-md-8"
+                     style=" height:40px;padding-top:10px; color:white;">
+                     Visit our Youtube Channel
+                 </div>
+            </div>
+        </div>
+    </div>
+     <div class="row container" style="margin:0px;padding-left:50px;padding-right:50px;padding-top:2px;">
+                <div class="col-md-3"  style="margin:0px;padding:0px;">
+                    <img src="images/Introduce.png" />
+                </div>
+                <div class="col-md-9 text-left" style="margin:0px;height:45px;
+                            padding-left:120px;
+                            padding-top:5px;
+                            font-size:x-large;
+                            background-image:url(images/NewsLine.png);
+                            background-position-y:bottom;
+                            background-repeat:repeat-x;">
+                </div>
+            </div>
+    <div class="row container" style="margin:0px;padding-left:50px;padding-right:50px;padding-top:0px;">
+               <div style='padding:20px; word-wrap: break-word; word-break: break-all;
+display: block; width: 100%; background-color:white;'>
+                <%=productDetail %>
+            </div>
+    </div>
+       <div class="row container" style="margin:0px;padding-left:50px;padding-right:50px;padding-top:10px;">
+                <div class="col-md-3"  style="margin:0px;padding:0px;">
+                    <img src="images/TechData.png" />
+                </div>
+                <div class="col-md-9 text-left" style="margin:0px;height:45px;
+                            padding-left:120px;
+                            padding-top:5px;
+                            font-size:x-large;
+                            background-image:url(images/NewsLine.png);
+                            background-position-y:bottom;
+                            background-repeat:repeat-x;">
+                </div>
+            </div>
+     <div class="row container" style="margin:0px;padding-left:50px;padding-right:50px;padding-top:0px;">
+<div style="margin: 0px; padding: 0px;padding-left:10px;padding-right:10px;">
+                <asp:Image ID="Image2" CssClass="img-responsive thumbnail"
+                        Style="width: 100%; " runat="server" />
+                    </div>
+    </div>
+     <div class="row container" style="margin:0px;padding-left:50px;padding-right:50px;padding-top:10px;">
+                <div class="col-md-3"  style="margin:0px;padding:0px;">
+                    <img src="images/comment.png" />
+                </div>
+                <div class="col-md-9 text-left" style="margin:0px;height:45px;
+                            padding-left:120px;
+                            padding-top:5px;
+                            font-size:x-large;
+                            background-image:url(images/NewsLine.png);
+                            background-position-y:bottom;
+                            background-repeat:repeat-x;">
+                </div>
+            </div>
+      <div class="row" style="margin:0px;padding-left:50px;padding-right:50px;padding-top:10px;">
+            <div class="row">
+                <div class="col-md-4 " style="margin: 0px;">
+                    <div class="input-group">
+                        <span class="input-group-addon" style="font-family:Courier New, Courier, monospace; background-color: #36A84E; color: white;">Name&nbsp;&nbsp;&nbsp;</span>
+                        <asp:TextBox ID="Name" runat="server" class="form-control" placeholder="Name"> </asp:TextBox>
+                    </div>
+                    <asp:RequiredFieldValidator ID="RequiredFieldValidator1" runat="server" ErrorMessage="Name Should not empty" ControlToValidate="Name" ForeColor="Red"></asp:RequiredFieldValidator>
+                    <br />
+                    <div class="input-group">
+                        <span class="input-group-addon"
+                            style="font-family:Courier New, Courier, monospace; background-color: #36A84E; color: white;">Tele&nbsp;&nbsp;&nbsp;</span>
+                        <asp:TextBox ID="Telephone" runat="server" class="form-control" placeholder="Telephone"> </asp:TextBox>
+                    </div>
+                    <asp:RequiredFieldValidator ID="RequiredFieldValidator2" runat="server" ErrorMessage="Tele Should not empty" ControlToValidate="Telephone" ForeColor="Red"></asp:RequiredFieldValidator>
+                </div>
+                <div class="col-md-6 ">
+                    <div class="input-group">
+                        <span class="input-group-addon" style="font-family:Courier New, Courier, monospace; background-color: #36A84E; color: white;">Address&nbsp;</span>
+                        <asp:TextBox ID="Address" runat="server" class="form-control" placeholder="Address" Rows="4" TextMode="MultiLine"> </asp:TextBox>
+                    </div>
+                  </div>
+                <div class="col-md-2 ">
+                    <br />
+                </div>
+            </div>
+    </div>
+     <div class="row" style="margin:0px;padding-left:50px;padding-right:50px;padding-top:10px;">
+        <div class="row">
+                <div class="col-md-4 " style="margin: 0px;">
+                      <div class="input-group">
+                        <span class="input-group-addon" style="font-family:Courier New, Courier, monospace; background-color: #36A84E; color: white;">Mail&nbsp;&nbsp;&nbsp;</span>
+                        <asp:TextBox ID="EMail" runat="server" class="form-control" placeholder="E-Mail"> </asp:TextBox>
+                    </div>
+                                         <asp:RequiredFieldValidator ID="RequiredFieldValidator3" runat="server" ErrorMessage="Mail Should not empty" ControlToValidate="EMail" ForeColor="Red"></asp:RequiredFieldValidator>
+<asp:RegularExpressionValidator ID="RegularExpressionValidator1" runat="server" ControlToValidate="EMail" ErrorMessage="Email ia wrong" ForeColor="Red" ValidationExpression="\w+([-+.']\w+)*@\w+([-.]\w+)*\.\w+([-.]\w+)*">
+</asp:RegularExpressionValidator>
+                    <br />
+                    <div class=" input-group">
+                        <span class="input-group-addon" style="font-family:Courier New, Courier, monospace; background-color: #36A84E; color: white;">Country</span>
+                        <asp:DropDownList ID="DropDownList1" runat="server" class="form-control">
+<asp:ListItem Value="Albania">Albania</asp:ListItem>
+<asp:ListItem Value="Algeria">Algeria</asp:ListItem>
+<asp:ListItem Value="American Samoa">American Samoa</asp:ListItem>
+<asp:ListItem Value=“Andorra">Andorra</asp:ListItem>
+<asp:ListItem Value=“Angola">Angola</asp:ListItem>
+<asp:ListItem Value=“Anguilla">Anguilla</asp:ListItem>
+<asp:ListItem Value=“Antigua">Antigua</asp:ListItem>
+<asp:ListItem Value=“Argentina">Argentina</asp:ListItem>
+<asp:ListItem Value=“Armenia">Armenia</asp:ListItem>
+<asp:ListItem Value=“Aruba">Aruba</asp:ListItem>
+<asp:ListItem Value=“Australia">Australia</asp:ListItem>
+<asp:ListItem Value=“Austria">Austria</asp:ListItem>
+<asp:ListItem Value=“Azerbaijan">Azerbaijan</asp:ListItem>
+<asp:ListItem Value=“Bahamas">Bahamas</asp:ListItem>
+<asp:ListItem Value=“Bahrain">Bahrain</asp:ListItem>
+<asp:ListItem Value=“Bangladesh">Bangladesh</asp:ListItem>
+<asp:ListItem Value=“Barbados">Barbados</asp:ListItem>
+<asp:ListItem Value=“Barbuda">Barbuda</asp:ListItem>
+<asp:ListItem Value=“Belarus">Belarus</asp:ListItem>
+<asp:ListItem Value=“Belgium">Belgium</asp:ListItem>
+<asp:ListItem Value=“Belize">Belize</asp:ListItem>
+<asp:ListItem Value=“Benin">Benin</asp:ListItem>
+<asp:ListItem Value=“Bermuda">Bermuda</asp:ListItem>
+<asp:ListItem Value=“Bhutan">Bhutan</asp:ListItem>
+<asp:ListItem Value=“Bolivia">Bolivia</asp:ListItem>
+<asp:ListItem Value=“Bonaire">Bonaire</asp:ListItem>
+<asp:ListItem Value=“Bosnia-Herzegovina">Bosnia-Herzegovina</asp:ListItem>
+<asp:ListItem Value=“Botswana">Botswana</asp:ListItem>
+<asp:ListItem Value=“Brazil">Brazil</asp:ListItem>
+<asp:ListItem Value=“British Virgin Islands">British Virgin Islands</asp:ListItem>
+<asp:ListItem Value=“Brunei">Brunei</asp:ListItem>
+<asp:ListItem Value=“Bulgaria">Bulgaria</asp:ListItem>
+<asp:ListItem Value=“Burkina Faso">Burkina Faso</asp:ListItem>
+<asp:ListItem Value=“Burundi">Burundi</asp:ListItem>
+<asp:ListItem Value=“Cambodia">Cambodia</asp:ListItem>
+<asp:ListItem Value=“Cameroon">Cameroon</asp:ListItem>
+<asp:ListItem Value=“Canada">Canada</asp:ListItem>
+<asp:ListItem Value=“Cape Verde">Cape Verde</asp:ListItem>
+<asp:ListItem Value=“Cayman Islands">Cayman Islands</asp:ListItem>
+<asp:ListItem Value=“Central African Republic">Central African Republic</asp:ListItem>
+<asp:ListItem Value=“Chad">Chad</asp:ListItem>
+<asp:ListItem Value=“Channel Islands">Channel Islands</asp:ListItem>
+<asp:ListItem Value=“Chile">Chile</asp:ListItem>
+<asp:ListItem Value=“China">China</asp:ListItem>
+<asp:ListItem Value=“Colombia">Colombia</asp:ListItem>
+<asp:ListItem Value=“Congo - Brazzaville">Congo - Brazzaville</asp:ListItem>
+<asp:ListItem Value=“Congo, The Republic o">Congo, The Republic of</asp:ListItem>
+<asp:ListItem Value=“Cook Islands">Cook Islands</asp:ListItem>
+<asp:ListItem Value=“Costa Rica">Costa Rica</asp:ListItem>
+<asp:ListItem Value=“Croatia">Croatia</asp:ListItem>
+<asp:ListItem Value=“Curacao">Curacao</asp:ListItem>
+<asp:ListItem Value=“Cyprus">Cyprus</asp:ListItem>
+<asp:ListItem Value=“Czech Republi">Czech Republic</asp:ListItem>
+<asp:ListItem Value=“Denmark">Denmark</asp:ListItem>
+<asp:ListItem Value=“Djibouti">Djibouti</asp:ListItem>
+<asp:ListItem Value=“Dominica">Dominica</asp:ListItem>
+<asp:ListItem Value=“Dominican Republic">Dominican Republic</asp:ListItem>
+<asp:ListItem Value=“Ecuador">Ecuador</asp:ListItem>
+<asp:ListItem Value=“Egypt">Egypt</asp:ListItem>
+<asp:ListItem Value=“El Salvador">El Salvador</asp:ListItem>
+<asp:ListItem Value=“Equatorial Guinea">Equatorial Guinea</asp:ListItem>
+<asp:ListItem Value=“Eritrea">Eritrea</asp:ListItem>
+<asp:ListItem Value=“Estonia">Estonia</asp:ListItem>
+<asp:ListItem Value=“Ethiopia">Ethiopia</asp:ListItem>
+<asp:ListItem Value=“Faroe Islands">Faroe Islands</asp:ListItem>
+<asp:ListItem Value=“Fiji">Fiji</asp:ListItem>
+<asp:ListItem Value=“Finland">Finland</asp:ListItem>
+<asp:ListItem Value=“France">France</asp:ListItem>
+<asp:ListItem Value=“French Guiana">French Guiana</asp:ListItem>
+<asp:ListItem Value=“French Polynesia">French Polynesia</asp:ListItem>
+<asp:ListItem Value=“Gabon">Gabon</asp:ListItem>
+<asp:ListItem Value=“Gambia">Gambia</asp:ListItem>
+<asp:ListItem Value=“Georgia">Georgia</asp:ListItem>
+<asp:ListItem Value=“Germany">Germany</asp:ListItem>
+<asp:ListItem Value=“Ghana">Ghana</asp:ListItem>
+<asp:ListItem Value=“Gibraltar">Gibraltar</asp:ListItem>
+<asp:ListItem Value=“Greece">Greece</asp:ListItem>
+<asp:ListItem Value=“Greenland">Greenland</asp:ListItem>
+<asp:ListItem Value=“Grenada">Grenada</asp:ListItem>
+<asp:ListItem Value=“Guadeloupe">Guadeloupe</asp:ListItem>
+<asp:ListItem Value=“Guam">Guam</asp:ListItem>
+<asp:ListItem Value=“Guatemala">Guatemala</asp:ListItem>
+<asp:ListItem Value=“Guinea Bissau">Guinea Bissau</asp:ListItem>
+<asp:ListItem Value=“Guinea">Guinea</asp:ListItem>
+<asp:ListItem Value=“Guyana">Guyana</asp:ListItem>
+<asp:ListItem Value=“Haiti">Haiti</asp:ListItem>
+<asp:ListItem Value=“Honduras">Honduras</asp:ListItem>
+<asp:ListItem Value=“Hong Kong">Hong Kong</asp:ListItem>
+<asp:ListItem Value=“Hungary">Hungary</asp:ListItem>
+<asp:ListItem Value=“Iceland">Iceland</asp:ListItem>
+<asp:ListItem Value=“India">India</asp:ListItem>
+<asp:ListItem Value=“Indonesia">Indonesia</asp:ListItem>
+<asp:ListItem Value=“Iran">Iran</asp:ListItem>
+<asp:ListItem Value=“Iraq">Iraq</asp:ListItem>
+<asp:ListItem Value=“Ireland">Ireland</asp:ListItem>
+<asp:ListItem Value=“Israel">Israel</asp:ListItem>
+<asp:ListItem Value=“Italy">Italy</asp:ListItem>
+<asp:ListItem Value=“Ivory Coast">Ivory Coast</asp:ListItem>
+<asp:ListItem Value=“Jamaica">Jamaica</asp:ListItem>
+<asp:ListItem Value=“Japan">Japan</asp:ListItem>
+<asp:ListItem Value=“Jordan">Jordan</asp:ListItem>
+<asp:ListItem Value=“Kazakhstan">Kazakhstan</asp:ListItem>
+<asp:ListItem Value=“Kenya">Kenya</asp:ListItem>
+<asp:ListItem Value=“Kuwait">Kuwait</asp:ListItem>
+<asp:ListItem Value=“Kyrgyzstan">Kyrgyzstan</asp:ListItem>
+<asp:ListItem Value=“Laos">Laos</asp:ListItem>
+<asp:ListItem Value=“Latvia">Latvia</asp:ListItem>
+<asp:ListItem Value=“Lebanon">Lebanon</asp:ListItem>
+<asp:ListItem Value=“Lesotho">Lesotho</asp:ListItem>
+<asp:ListItem Value=“Liberia">Liberia</asp:ListItem>
+<asp:ListItem Value=“Libya">Libya</asp:ListItem>
+<asp:ListItem Value=“Liechtenstein">Liechtenstein</asp:ListItem>
+<asp:ListItem Value=“Lithuania">Lithuania</asp:ListItem>
+<asp:ListItem Value=“Luxembourg">Luxembourg</asp:ListItem>
+<asp:ListItem Value=“Macau">Macau</asp:ListItem>
+<asp:ListItem Value=“Macedonia">Macedonia</asp:ListItem>
+<asp:ListItem Value=“Madagascar">Madagascar</asp:ListItem>
+<asp:ListItem Value=“Malawi">Malawi</asp:ListItem>
+<asp:ListItem Value=“Malaysia">Malaysia</asp:ListItem>
+<asp:ListItem Value=“Maldives">Maldives</asp:ListItem>
+<asp:ListItem Value=“Mali">Mali</asp:ListItem>
+<asp:ListItem Value=“Malta">Malta</asp:ListItem>
+<asp:ListItem Value=“Marshall Islands">Marshall Islands</asp:ListItem>
+<asp:ListItem Value=“Martinique">Martinique</asp:ListItem>
+<asp:ListItem Value=“Mauritania">Mauritania</asp:ListItem>
+<asp:ListItem Value=“Mauritius">Mauritius</asp:ListItem>
+<asp:ListItem Value=“Mexico">Mexico</asp:ListItem>
+<asp:ListItem Value=“Micronesia">Micronesia</asp:ListItem>
+<asp:ListItem Value=“Moldova">Moldova</asp:ListItem>
+<asp:ListItem Value=“Monaco">Monaco</asp:ListItem>
+<asp:ListItem Value=“Mongolia">Mongolia</asp:ListItem>
+<asp:ListItem Value=“Montserrat">Montserrat</asp:ListItem>
+<asp:ListItem Value=“Morocco">Morocco</asp:ListItem>
+<asp:ListItem Value=“Mozambique">Mozambique</asp:ListItem>
+<asp:ListItem Value=“Myanmar/Burma">Myanmar/Burma</asp:ListItem>
+<asp:ListItem Value=“Namibia">Namibia</asp:ListItem>
+<asp:ListItem Value=“Nepal">Nepal</asp:ListItem>
+<asp:ListItem Value=“Netherlands Antilles">Netherlands Antilles</asp:ListItem>
+<asp:ListItem Value=“Netherlands">Netherlands</asp:ListItem>
+<asp:ListItem Value=“New Caledonia">New Caledonia</asp:ListItem>
+<asp:ListItem Value=“New Zealand">New Zealand</asp:ListItem>
+<asp:ListItem Value=“Nicaragua">Nicaragua</asp:ListItem>
+<asp:ListItem Value=“Niger">Niger</asp:ListItem>
+<asp:ListItem Value=“Nigeria">Nigeria</asp:ListItem>
+<asp:ListItem Value=“Norway">Norway</asp:ListItem>
+<asp:ListItem Value=“Oman">Oman</asp:ListItem>
+<asp:ListItem Value=“Pakistan">Pakistan</asp:ListItem>
+<asp:ListItem Value=“Palau">Palau</asp:ListItem>
+<asp:ListItem Value=“Panama">Panama</asp:ListItem>
+<asp:ListItem Value=“Papua New Guinea">Papua New Guinea</asp:ListItem>
+<asp:ListItem Value=“Paraguay">Paraguay</asp:ListItem>
+<asp:ListItem Value=“Peru">Peru</asp:ListItem>
+<asp:ListItem Value=“Philippines">Philippines</asp:ListItem>
+<asp:ListItem Value=“Poland">Poland</asp:ListItem>
+<asp:ListItem Value=“Portugal">Portugal</asp:ListItem>
+<asp:ListItem Value=“Puerto Rico">Puerto Rico</asp:ListItem>
+<asp:ListItem Value=“Qatar">Qatar</asp:ListItem>
+<asp:ListItem Value=“Reunion">Reunion</asp:ListItem>
+<asp:ListItem Value=“Romania">Romania</asp:ListItem>
+<asp:ListItem Value=“Russia">Russia</asp:ListItem>
+<asp:ListItem Value=“Rwanda">Rwanda</asp:ListItem>
+<asp:ListItem Value=“Saba">Saba</asp:ListItem>
+<asp:ListItem Value=“Saipan">Saipan</asp:ListItem>
+<asp:ListItem Value=“San Marino">San Marino</asp:ListItem>
+<asp:ListItem Value=“Saudi Arabia">Saudi Arabia</asp:ListItem>
+<asp:ListItem Value=“Senegal">Senegal</asp:ListItem>
+<asp:ListItem Value=“Seychelles">Seychelles</asp:ListItem>
+<asp:ListItem Value=“Sierra Leone">Sierra Leone</asp:ListItem>
+<asp:ListItem Value=“Singapore">Singapore</asp:ListItem>
+<asp:ListItem Value=“Slovak Republic">Slovak Republic</asp:ListItem>
+<asp:ListItem Value=“Slovenia">Slovenia</asp:ListItem>
+<asp:ListItem Value=“Somalia">Somalia</asp:ListItem>
+<asp:ListItem Value=“South Africa">South Africa</asp:ListItem>
+<asp:ListItem Value=“South Korea">South Korea</asp:ListItem>
+<asp:ListItem Value=“Spain">Spain</asp:ListItem>
+<asp:ListItem Value=“Sri Lanka">Sri Lanka</asp:ListItem>
+<asp:ListItem Value=“St. Croix">St. Croix</asp:ListItem>
+<asp:ListItem Value=“St. Eustatius">St. Eustatius</asp:ListItem>
+<asp:ListItem Value=“St. Kitts and Nevis">St. Kitts and Nevis</asp:ListItem>
+<asp:ListItem Value=“St. Lucia">St. Lucia</asp:ListItem>
+<asp:ListItem Value=“St. Maarten/St. Martin">St. Maarten/St. Martin</asp:ListItem>
+<asp:ListItem Value=“St. Thomas">St. Thomas</asp:ListItem>
+<asp:ListItem Value=“St. Vincent">St. Vincent</asp:ListItem>
+<asp:ListItem Value=“Sudan">Sudan</asp:ListItem>
+<asp:ListItem Value=“Suriname">Suriname</asp:ListItem>
+<asp:ListItem Value=“Swaziland">Swaziland</asp:ListItem>
+<asp:ListItem Value=“Sweden">Sweden</asp:ListItem>
+<asp:ListItem Value=“Switzerland">Switzerland</asp:ListItem>
+<asp:ListItem Value=“Syria">Syria</asp:ListItem>
+<asp:ListItem Value=“Taiwan">Taiwan</asp:ListItem>
+<asp:ListItem Value=“Tanzania">Tanzania</asp:ListItem>
+<asp:ListItem Value=“Thailand">Thailand</asp:ListItem>
+<asp:ListItem Value=“Togo">Togo</asp:ListItem>
+<asp:ListItem Value=“Tortola">Tortola</asp:ListItem>
+<asp:ListItem Value=“Trinidad and Tobago">Trinidad and Tobago</asp:ListItem>
+<asp:ListItem Value=“Tunisia">Tunisia</asp:ListItem>
+<asp:ListItem Value=“Turkey">Turkey</asp:ListItem>
+<asp:ListItem Value=“Turkmenistan">Turkmenistan</asp:ListItem>
+<asp:ListItem Value=“Turks and Caicos Islands">Turks and Caicos Islands</asp:ListItem>
+<asp:ListItem Value=“U.S. Virgin Islands">U.S. Virgin Islands</asp:ListItem>
+<asp:ListItem Value=“Uganda">Uganda</asp:ListItem>
+<asp:ListItem Value=“Ukraine">Ukraine</asp:ListItem>
+<asp:ListItem Value=“United Arab Emirates">United Arab Emirates</asp:ListItem>
+<asp:ListItem Value=“United Kingdom">United Kingdom</asp:ListItem>
+<asp:ListItem Value=“Uruguay">Uruguay</asp:ListItem>
+<asp:ListItem Value=“Uzbekistan">Uzbekistan</asp:ListItem>
+<asp:ListItem Value=“Vanuatu">Vanuatu</asp:ListItem>
+<asp:ListItem Value=“Vatican City">Vatican City</asp:ListItem>
+<asp:ListItem Value=“Venezuela">Venezuela</asp:ListItem>
+<asp:ListItem Value=“Vietnam">Vietnam</asp:ListItem>
+<asp:ListItem Value=“Wallis &amp; Futuna">Wallis &amp; Futuna</asp:ListItem>
+<asp:ListItem Value=“Yemen">Yemen</asp:ListItem>
+<asp:ListItem Value=“Zambia">Zambia</asp:ListItem>
+<asp:ListItem Value=“Zimbabwe">Zimbabwe</asp:ListItem>
+</asp:DropDownList>
+                    </div>
+                </div>
+                <div class="col-md-6 " style="margin-top: 5px;">
+                      <div class=" input-group">
+                        <span class="input-group-addon" style="font-family:Courier New, Courier, monospace; background-color: #36A84E; color: white;">Comments</span>
+                        <asp:TextBox ID="TextBoxDetail" runat="server" class="form-control" placeholder="Comments" Rows="4" TextMode="MultiLine"></asp:TextBox>
+                    </div>
+<asp:RequiredFieldValidator ID="RequiredFieldValidator4" runat="server" ErrorMessage="Comments Should not empty" ControlToValidate="TextBoxDetail" ForeColor="Red"></asp:RequiredFieldValidator>
+                </div>
+                <div class="col-md-2 " style="margin-top: 60px;">
+<asp:Label ID="LabelPromte" runat="server" Text="" ForeColor="Red"></asp:Label>
+                    <asp:Button ID="ButtonCommit" runat="server" Text="Commit" CssClass="btn btn-primary btn-block"   Style="font-family: 'Times New Roman', Times, serif; background-color: #36A84E; color: white;" OnClick="ButtonCommit_Click" />
+                </div>
+            </div>
+    </div>
+</asp:Content>
+
+ViewProductDetail.aspx.cs
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Web;
+using System.Web.UI;
+using System.Web.UI.WebControls;
+using System.Data;
+namespace Clover
+{
+    public partial class _ViewProductDetail : Page
+    {
+        protected int id = 0;
+        protected string productPhotoUrl = "";
+        protected string TechnicalDataPhotoUrl = "";
+        protected string productName = "";
+        protected string productDetail = "";
+        protected void Page_Load(object sender, EventArgs e)
+        {
+            try
+            {
+                id=Convert.ToInt32(Request.QueryString["id"].ToString());
+            }
+            catch (Exception ex)
+            {
+                id = 13;
+            }
+            if (!IsPostBack)
+            {
+                bindTypeAndProducts(id);
+                setNavigateBar(id);
+            }
+        }
+        private void setNavigateBar(int id)
+        {
+            Clover.AppCode.dbOperator dbOperator = new Clover.AppCode.dbOperator();
+            DataSet ds = dbOperator.getaProductAllPartents(id);
+            this.Repeater3.DataSource = ds.Tables[0].DefaultView;
+            return;
+        }
+        private void bindTypeAndProducts(int id)
+        {
+            Clover.AppCode.dbOperator dbOperator = new Clover.AppCode.dbOperator();
+            string[] ret = dbOperator.getaProductInto(id);
+            this.productName = ret[0];
+            this.productDetail = ret[1];
+            this.productPhotoUrl = "./pictures/" + ret[3];
+            this.ImageshowDetail.ImageUrl = productPhotoUrl;
+            this.Image2.ImageUrl= "./pictures/" + ret[2];
+            DataSet ds = dbOperator.getaProductPicture(id);
+            this.Repeater1.DataSource = ds.Tables[0].DefaultView;
+            this.Repeater1.DataBind();
+            int count = 0;
+            if (ds == null || ds.Tables[0].Rows.Count == 0)
+                count = 9;
+            else
+                count = 9 - ds.Tables[0].Rows.Count;
+            ds = dbOperator.getaFakeProductPicture(count);
+            this.Repeater2.DataSource = ds.Tables[0].DefaultView;
+            this.Repeater2.DataBind();
+        }
+        protected void ButtonCommit_Click(object sender, EventArgs e)
+        {
+            Comments comments = new Comments();
+            comments.name = this.Name.Text.Trim();
+            if (comments.name == "")
+            {
+                this.LabelPromte.Text = "name can not empty";
+                return;
+            }
+            comments.addr = this.Address.Text.Trim();
+            comments.tele = this.Telephone.Text.Trim();
+            if (comments.tele == "")
+            {
+                this.LabelPromte.Text = "telephone can not empty";
+                return;
+            }
+            comments.mail = this.EMail.Text.Trim();
+            if (comments.mail == "")
+            {
+                this.LabelPromte.Text = "mail can not empty";
+                return;
+            }
+            comments.comment = this.TextBoxDetail.Text.Trim();
+            if (comments.comment == "")
+            {
+                this.LabelPromte.Text = "commets can not empty";
+                return;
+            }
+            comments.country = this.DropDownList1.SelectedValue.ToString();
+            Clover.AppCode.dbOperator db = new AppCode.dbOperator();
+            string ret = db.addComment(comments);
+            this.LabelPromte.Text = ret;
+            if (ret == "ok")
+            {
+                this.Telephone.Text = "";
+                this.TextBoxDetail.Text = "";
+                this.Name.Text = "";
+                this.Address.Text = "";
+                this.DropDownList1.SelectedIndex = 0;
+                this.EMail.Text = "";
+            }
+        }
+    }
+}
+
+ViewSubTypeProducts.aspx
+<%@ Page Title="Products" ValidateRequest="false" Language="C#" MasterPageFile="~/Site.Master" AutoEventWireup="true" CodeBehind="ViewSubTypeProduct.aspx.cs" Inherits="Clover.Manage.ViewSubTypeProduct" %>
+<asp:Content ID="Content1" ContentPlaceHolderID="MainContent" runat="server">
+    <div class="clearfix" style="padding:0px;margin:0px;"></div>
+    <div class="row container btn-block" style="font-size:large;margin:0px;padding:0px;padding-left:110px;background-color:#F5F7FB;">
+                    <a href='Products.aspx'>Product</a>
+                    <asp:Repeater ID="Repeater2" runat="server">
+                        <ItemTemplate>
+                            &nbsp;-&nbsp;<a href='<%# "ViewSubType.aspx?typeId=" + Eval("id")%>'><%# Eval("typeName")%></a>
+                        </ItemTemplate>
+                    </asp:Repeater>
+  </div>
+<div class="row container " style="margin:0px;padding-left:110px;padding-right:100px;padding-top:50px;">
+                <div class="col-md-12 text-right" style="margin:0px;height:45px;
+                            padding-left:20px;
+                            padding-top:5px;
+                            color:#36A84E;
+                            background-image:url(images/NewsLine.png);
+                            background-position-y:bottom;
+                            background-repeat:repeat-x;">
+                  <h2><%=typeName %></h2>
+                </div>
+            </div>
+    <div class="row" style="margin:0px;padding-left:110px;padding-right:100px;">
+        <div class="col-md-4 text-center" style="margin:0px;padding:0px;" >
+            <div>
+                <a href="Products.aspx"><img src="images/icon.png" /></a>
+            </div>
+            <div class="img-circle" style="padding-top:20px;">
+                <img src='<%= typePic %>' style="width:300px;height:200px;" />
+            </div>
+        </div>
+        <div class="col-md-8" style="margin:0px;padding:3px;background-color:white;">
+            <div class="row container" style="margin:0px;padding:0px;">
+                <asp:Repeater ID="Repeater1" runat="server">
+                    <ItemTemplate>
+                    <div class="col-md-6 text-center" style="margin:0px;padding:5px;background-color:white;">
+                       <a href='<%# "viewProductDetailNew.aspx?id=" + Eval("id") %>'  >
+                    <img class="img-thumbnail" src='<%# "./pictures/" + Eval("PhotoUrl") %>' style="width: 100%; height: 200px;" />
+                     <div class="thumbnail" style="background-color:lightgray;">
+                        <%#Eval("ProductName") %>
+                    </div>
+                    </a>
+                    </div>
+                        </ItemTemplate>
+                </asp:Repeater>
+            </div>
+        </div>
+    </div>
+<div class="row container" style="margin:0px;padding-left:110px;padding-right:100px;padding-top:0px;">
+                <div  style="margin:0px;height:45px;
+                            padding-left:20px;
+                            padding-top:0px;
+                            font-size:x-large;
+                            background-image:url(images/NewsLine.png);
+                            background-position-y:top;
+                            background-repeat:repeat-x;">
+                </div>
+            </div>
+</asp:Content>
+
+ViewSubTypeProducts.aspx.cs
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Web;
+using System.Web.UI;
+using System.Web.UI.WebControls;
+using System.Data;
+namespace Clover.Manage
+{
+    public partial class ViewSubTypeProduct : System.Web.UI.Page
+    {
+        protected string typePic = "";
+        protected string typeName = "";
+        protected void Page_Load(object sender, EventArgs e)
+        {
+            int id;
+            try
+            {
+                id = Convert.ToInt32(Request.QueryString["typeId"].ToString());
+            }
+            catch (Exception ex)
+            {
+                id = 35;
+            }
+            if (!IsPostBack)
+            {
+                bindTypeInfo(id);
+            }
+        }
+        private void bindTypeInfo(int id)
+        {
+            Clover.AppCode.dbOperator db = new Clover.AppCode.dbOperator();
+            string[] ret = db.getATypeNameAndDetail(id);
+            typeName = ret[0];
+            typePic = "pictures/"+ret[2];
+this.Repeater1.DataSource = db.getATypeAllProduct(id).Tables[0].DefaultView;
+            this.Repeater2.DataSource = db.getaTypeAllPartents(id);
+            Page.DataBind();
+        }
+    }
+}
+
+WebformComments.aspx.cs
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Web;
+using System.Web.UI;
+using System.Web.UI.WebControls;
+using System.Data;
+using System.IO;
+namespace Clover.Manage
+{
+    public partial class WebFormComments : System.Web.UI.Page
+    {
+        protected void Page_Load(object sender, EventArgs e)
+        {
+            if (Session["UserName"] == null)
+            {
+                Response.Redirect("Login.aspx");
+            }
+            if (!IsPostBack)
+            {
+                bindComments();
+            }
+        }
+        private void bindComments()
+        {
+            Clover.AppCode.dbOperator db = new AppCode.dbOperator();
+            string memo;
+            int flag = 0;
+            if (this.RadioButton1.Checked == true)
+                flag = 1;
+            else
+                flag = 2;
+            DataSet ds1 = db.getComments(flag,out memo);
+            this.GridView1.DataSource = ds1.Tables[0].DefaultView;
+            this.GridView1.DataBind();
+        }
+        protected void GridView1_RowDataBound(object sender, GridViewRowEventArgs e)
+        {
+            int i;
+                //首先判断是否是数据行
+                if (e.Row.RowType == DataControlRowType.DataRow)
+                {
+                    //当鼠标停留时更改背景色
+                    e.Row.Attributes.Add("onmouseover", "c=this.style.backgroundColor;this.style.backgroundColor='#00A9FF'");
+                    //当鼠标移开时还原背景色
+                    e.Row.Attributes.Add("onmouseout", "this.style.backgroundColor=c");
+            }
+            if (e.Row.RowIndex != -1)
+            {
+                int id = e.Row.RowIndex + 1;
+                e.Row.Cells[1].Text = id.ToString();
+            }
+        }
+        protected void Button2_Click(object sender, EventArgs e)
+        {
+            AppCode.dbOperator db = new AppCode.dbOperator();
+            for (int i = 0; i <= this.GridView1.Rows.Count - 1; i++)
+            {
+                CheckBox CheckBox = (CheckBox)GridView1.Rows[i].FindControl("cbItem");
+                if (CheckBox.Checked == true)
+                {
+                    //string id = this.GridView1.Rows[i].Cells[0].Text.ToString();
+                    string id = this.GridView1.DataKeys[i].Value.ToString();
+                    string ret = db.updateCommentStatus(Convert.ToInt32(id), 1);
+                }
+            }
+            bindComments();
+        }
+        protected void Button3_Click(object sender, EventArgs e)
+        {
+            AppCode.dbOperator db = new AppCode.dbOperator();
+            for (int i = 0; i <= this.GridView1.Rows.Count - 1; i++)
+            {
+                CheckBox CheckBox = (CheckBox)GridView1.Rows[i].FindControl("cbItem");
+                if (CheckBox.Checked == true)
+                {
+                    string id = this.GridView1.DataKeys[i].Value.ToString();
+                    string ret = db.updateCommentStatus(Convert.ToInt32(id), 0);
+                }
+            }
+            bindComments();
+        }
+        protected void SelectAll(object sender, EventArgs e)
+        {
+            bool isChecked = ((CheckBox)(GridView1.HeaderRow.FindControl("cbHead"))).Checked;
+            foreach (GridViewRow gvRow in GridView1.Rows)
+            {
+                ((CheckBox)(gvRow.FindControl("cbItem"))).Checked = isChecked;
+            }
+        }
+        protected void RadioButton1_CheckedChanged(object sender, EventArgs e)
+        {
+            if(this.RadioButton1.Checked==true)
+            {
+                this.Button2.Enabled = true;
+                this.Button3.Enabled = false;
+            }
+            else
+            {
+                this.Button2.Enabled = false;
+                this.Button3.Enabled = true;
+            }
+            bindComments();
+        }
+protected void GridView1_PageIndexChanging(object sender, GridViewPageEventArgs e)
+        {
+            GridView1.PageIndex = e.NewPageIndex;
+            bindComments();
+        }
+        protected void Button1_Click(object sender, EventArgs e)
+        {
+            AppCode.dbOperator db = new AppCode.dbOperator();
+            for (int i = 0; i <= this.GridView1.Rows.Count - 1; i++)
+            {
+                CheckBox CheckBox = (CheckBox)GridView1.Rows[i].FindControl("cbItem");
+                if (CheckBox.Checked == true)
+                {
+                    string id = this.GridView1.DataKeys[i].Value.ToString();
+                    string ret = db.deleteComment(Convert.ToInt32(id)); //删除行
+                }
+            }
+            bindComments();
+        }
+        protected void Button4_Click(object sender, EventArgs e)
+        {
+            Clover.AppCode.dbOperator db = new AppCode.dbOperator();
+            string memo;
+            int flag = 0;
+            if (this.RadioButton1.Checked == true)
+                flag = 1;
+            else
+                flag = 2;
+            DataSet ds1 = db.getComments(flag, out memo);
+            Clover.AppCode.CSVHelper cvs = new AppCode.CSVHelper(ds1.Tables[0]);
+            string res = cvs.ExportCSV();
+            string file = Server.MapPath("../Export/out.csv");
+            StreamWriter sw = new StreamWriter(file);
+            sw.Write(res);
+            sw.Close();
+            try
+            {
+                FileInfo fileInfo = new FileInfo(file);
+                HttpContext.Current.Response.Clear();
+                HttpContext.Current.Response.ClearContent();//
+                HttpContext.Current.Response.ClearHeaders();
+                HttpContext.Current.Response.Buffer = false;
+                HttpContext.Current.Response.AddHeader("Content-Disposition", "attachment;filename=out.csv");
+                HttpContext.Current.Response.AddHeader("Content-Length", fileInfo.Length.ToString());
+                HttpContext.Current.Response.ContentEncoding = System.Text.Encoding.GetEncoding("utf-8");
+                HttpContext.Current.Response.WriteFile(fileInfo.FullName);
+                HttpContext.Current.Response.Write("[{\"success\":true}]");
+                HttpContext.Current.Response.Flush();
+                HttpContext.Current.Response.End();
+            }
+            catch (Exception ex)
+            {
+                string ret = ex.Message;
+            }
+        }
+        protected void GridView1_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            if (this.GridView1.SelectedIndex == -1)
+                return;
+            this.LabelMessage.Text = this.GridView1.Rows[this.GridView1.SelectedIndex].Cells[7].Text.ToString();
+            this.LabelMessage.Visible = true;
+        }
+        protected void GridView1_RowCreated(object sender, GridViewRowEventArgs e)
+        {
+            if (e.Row.RowType == DataControlRowType.DataRow ||
+            e.Row.RowType == DataControlRowType.Header)
+            {
+    e.Row.Cells[0].Visible = false; //如果想使第1列不可见,则将它的可见性设为false
+    e.Row.Cells[7].Visible = false; //如果想使第7列不可见,则将它的可见性设为false
+            }
+        }
+    }
+}

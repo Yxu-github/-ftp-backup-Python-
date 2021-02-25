@@ -24,7 +24,7 @@ class Xfer(object):
         self.__labelText = None  # Tkinter.StringVar()
         self.__file_list=[]
         self.__file_type=set()
-        self.__wigets=widgets = ['Downloading: ', Percentage(), ' ',
+        self.__widgets= ['Downloading: ', Percentage(), ' ',
                     Bar(marker='#',left='[',right=']'),
                     ' ', ETA(), ' ', FileTransferSpeed()]
         self.initEnv()
@@ -217,6 +217,7 @@ class Xfer(object):
         self.bar =ProgressBar(widgets=self.__widgets, maxval=os.path.getsize(localpath))
         self.bar.start()
         self.__ftp.storbinary('STOR ' + remotepath, open(localpath, 'rb'),buf_size,callback=self.__process_print)
+        self.bar.finish()
         self.debug_print("上传 %s 成功"%localpath)
 
     def downloadFile(self, remotepath="./", localpath='./'):
@@ -239,6 +240,7 @@ class Xfer(object):
             self.bar.start()
             self.file=open(localpath,"wb")
             self.__ftp.retrbinary('RETR ' + remotepath, self.__file_write)
+            self.bar.finish()
             self.file.close()
         except Exception as err:
             self.debug_print("下载文件%s时发生错误，错误描述为：%s"%(remotepath,err))
@@ -294,9 +296,12 @@ class Xfer(object):
             return
         self.debug_print("开始从本地目录:%s 备份到远程目录：%s"%(self.__Local,self.__Remote))
 
+        try:
+            self.uploadDir(self.__Local,self.__Remote)
+            self.debug_print("备份成功")
+        except Exception as err:
+            self.debug_print("备份失败")
 
-        self.uploadDir(self.__Local,self.__Remote)
-        self.debug_print("备份成功")
 
     def restore(self):
         '''
@@ -310,8 +315,12 @@ class Xfer(object):
             self.debug_print("尚未设置远程目录")
             return
         self.debug_print("开始从远程目录:%s 恢复到远程目录：%s"%( self.__Remote, self.__Local))
-        self.downloadDir(self.__Remote,self.__Local)
-        self.debug_print("恢复成功")
+        try:
+            self.downloadDir(self.__Remote,self.__Local)
+            self.debug_print("恢复成功")
+        except Exception:
+            self.debug_print("恢复失败")
+
 
     def __upload_process_print(self,block):
         '''
@@ -319,12 +328,12 @@ class Xfer(object):
         :param block:文件块
         :return:
         '''
-        self.bar+=len(block)
+        self.bar.update(len(block))
 
     def __file_write(self,block):
         '''用于下载时文件写入和显示下载进度'''
         self.file.write(block)
-        self.bar+=len(block)
+        self.bar.update(len(block))
 
     def debug_print(self,s):
         self.write_log(s)

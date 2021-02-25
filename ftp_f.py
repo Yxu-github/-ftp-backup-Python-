@@ -22,17 +22,22 @@ def downloadfile(ftp, remotepath, localpath):
     ftp.set_debuglevel(0)# 参数为0，关闭调试模式
     fp.close()
 
+
 #从本地上传文件到ftp
 def uploadfile(ftp, remotepath, localpath):
     bufsize = 1024
-    fp = open(localpath, 'rb')
-    ftp.storbinary('STOR ' + remotepath, fp, bufsize)
-    ftp.set_debuglevel(0)
-    fp.close()
+    with open(localpath, 'rb') as fp:
+        try:
+            ftp.cwd()
+            ftp.storbinary('STOR ' + remotepath, fp, bufsize)
+            ftp.set_debuglevel(0)
+            return 1
+        except Exception:
+            return -1
 
 if __name__ == "__main__":
     #host,port, username, password
-    ftp = ftpconnect("118.25.85.251", 21,"xuyi2", "12345687")
+    ftp = FTP("118.25.85.251", "xuyi2", "12345687")
 
     #下载文件，第一个是ftp服务器路径下的文件，第二个是要下载到本地的路径文件
     #downloadfile(ftp, "/12.mp3", r"C:\Users\Administrator\Desktop\ftp\download\test.mp3")
@@ -52,8 +57,10 @@ if __name__ == "__main__":
    # ftp.cwd('sss/xyxu')
     #ftp.mkd('stttt')
     # 返回一个文件名列表
-    filename_list = ftp.nlst()
-    print(filename_list)
+    filename_list = ftp.mlsd()
+    #print(filename_list)
+    for i in filename_list:
+        print(i)
     #
     # ftp.mkd('目录名')# 新建远程目录
     # ftp.rmd('目录名')  # 删除远程目录
